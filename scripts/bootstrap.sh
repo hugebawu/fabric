@@ -150,7 +150,7 @@ if [[ $VERSION =~ ^1\.[0-1]\.* ]]; then
   export THIRDPARTY_TAG=${MARCH}-${THIRDPARTY_IMAGE_VERSION}
 else
   # starting with 1.2.0, multi-arch images will be default
-  : ${CA_TAG:="$CA_VERSION"}
+  : ${CA_TAG:="$CA_VERSION"} # 冒号表示空命令，返回true(i.g., 0),提供一个占位符, 表明后面是表达式, 不是一个命令; 表达式{str:=expr}表示: 如果变量str不为空,${str:=expr}就等于str的值(即str的值保持不变)，若str为空，就把expr的值赋值给str
   : ${FABRIC_TAG:="$VERSION"}
   : ${THIRDPARTY_TAG:="$THIRDPARTY_IMAGE_VERSION"}
 fi
