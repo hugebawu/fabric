@@ -34,7 +34,7 @@ function validateArgs () {
 }
 
 function clearContainers () {
-        CONTAINER_IDS=$(docker ps -aq)
+        CONTAINER_IDS=$(docker ps -aq) # -a: 显示所有的容器，包括未运行的；-q: 静默模式，只显示容器编号
         if [ -z "$CONTAINER_IDS" -o "$CONTAINER_IDS" = " " ]; then
                 echo "---- No containers available for deletion ----"
         else
@@ -63,7 +63,7 @@ function networkUp () {
     if [ "${IF_COUCHDB}" == "couchdb" ]; then
       CHANNEL_NAME=$CH_NAME TIMEOUT=$CLI_TIMEOUT docker-compose -f $COMPOSE_FILE -f $COMPOSE_FILE_COUCH up -d 2>&1
     else
-      CHANNEL_NAME=$CH_NAME TIMEOUT=$CLI_TIMEOUT docker-compose -f $COMPOSE_FILE up -d 2>&1
+      CHANNEL_NAME=$CH_NAME TIMEOUT=$CLI_TIMEOUT docker-compose -f $COMPOSE_FILE up -d 2>&1 # 2>&1 表示将标准错误输出（STDERR）重定向到标准输出（STDOUT）
     fi
     if [ $? -ne 0 ]; then
 	echo "ERROR !!!! Unable to pull the images "
