@@ -11,7 +11,7 @@ CH_NAME="$2"
 CLI_TIMEOUT="$3"
 IF_COUCHDB="$4"
 
-: ${CLI_TIMEOUT:="10000"}
+: ${CLI_TIMEOUT:="10000"} # 如果没有给定CLI_TIMEOUT，则其默认为10000s
 
 COMPOSE_FILE=docker-compose-cli.yaml
 COMPOSE_FILE_COUCH=docker-compose-couch.yaml
@@ -57,7 +57,7 @@ function networkUp () {
     else
       #Generate all the artifacts that includes org certs, orderer genesis block,
       # channel configuration transaction
-      source generateArtifacts.sh $CH_NAME
+      source generateArtifacts.sh $CH_NAME # 在当前bash环境下读取并执行FileName中的命令，通常用命令“.”来替代
     fi
 
     if [ "${IF_COUCHDB}" == "couchdb" ]; then
@@ -69,7 +69,7 @@ function networkUp () {
 	echo "ERROR !!!! Unable to pull the images "
 	exit 1
     fi
-    docker logs -f cli
+    docker logs -f cli # 跟踪容器cli的日志输出
 }
 
 function networkDown () {
