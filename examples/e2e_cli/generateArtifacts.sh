@@ -20,7 +20,7 @@ OS_ARCH=$(echo "$(uname -s|tr '[:upper:]' '[:lower:]'|sed 's/mingw64_nt.*/window
 
 ## Using docker-compose template replace private key file names with constants
 function replacePrivateKey () {
-	ARCH=`uname -s | grep Darwin`
+	ARCH=`uname -s | grep Darwin` # 判断操作系统是否是Darwin(即Mac OSX)
 	if [ "$ARCH" == "Darwin" ]; then
 		OPTS="-it"
 	else
@@ -33,7 +33,7 @@ function replacePrivateKey () {
         cd crypto-config/peerOrganizations/org1.example.com/ca/
         PRIV_KEY=$(ls *_sk)
         cd $CURRENT_DIR
-        sed $OPTS "s/CA1_PRIVATE_KEY/${PRIV_KEY}/g" docker-compose-e2e.yaml
+        sed $OPTS "s/CA1_PRIVATE_KEY/${PRIV_KEY}/g" docker-compose-e2e.yaml # sed 's/要被取代的字串/新的字串/g'
         cd crypto-config/peerOrganizations/org2.example.com/ca/
         PRIV_KEY=$(ls *_sk)
         cd $CURRENT_DIR
@@ -48,7 +48,7 @@ function generateCerts (){
             echo "Using cryptogen -> $CRYPTOGEN"
 	else
 	    echo "Building cryptogen"
-	    make -C $FABRIC_ROOT release
+	    make -C $FABRIC_ROOT release # -C 后面跟路径
 	fi
 
 	echo
@@ -61,7 +61,7 @@ function generateCerts (){
 
 function generateIdemixMaterial (){
 	IDEMIXGEN=$FABRIC_ROOT/release/$OS_ARCH/bin/idemixgen
-	CURDIR=`pwd`
+	CURDIR=`pwd` # 记录当前位置用于还原
 	IDEMIXMATDIR=$CURDIR/crypto-config/idemix
 
 	if [ -f "$IDEMIXGEN" ]; then
@@ -103,13 +103,13 @@ function generateChannelArtifacts() {
 	echo "#########  Generating Orderer Genesis block ##############"
 	echo "##########################################################"
 	# Note: For some unknown reason (at least for now) the block file can't be
-	# named orderer.genesis.block or the orderer will fail to launch!
+	# named orderer.genesis.block or the orderer will fail to launch! # orderer节点加入的系统通道对应的创世块
 	$CONFIGTXGEN -profile TwoOrgsOrdererGenesis -channelID e2e-orderer-syschan -outputBlock ./channel-artifacts/genesis.block
 
 	echo
 	echo "#################################################################"
 	echo "### Generating channel configuration transaction 'channel.tx' ###"
-	echo "#################################################################"
+	echo "#################################################################" # 生成普通通道创建交易，该交易可以用于创建普通通道。
 	$CONFIGTXGEN -profile TwoOrgsChannel -outputCreateChannelTx ./channel-artifacts/channel.tx -channelID $CHANNEL_NAME
 
 	echo
@@ -126,7 +126,7 @@ function generateChannelArtifacts() {
 	echo
 }
 
-generateCerts
-generateIdemixMaterial
+generateCerts # 生成MSP服务需要用到的公、私钥和证书
+generateIdemixMaterial # 该方法不知道干嘛的，有待研究
 replacePrivateKey
 generateChannelArtifacts
