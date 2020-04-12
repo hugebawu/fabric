@@ -124,13 +124,13 @@ func (csp *impl) getECKey(ski []byte) (pubKey *ecdsa.PublicKey, isPriv bool, err
 	session := csp.getSession()
 	defer csp.returnSession(session)
 	isPriv = true
-	_, err = findKeyPairFromSKI(p11lib, session, ski, csp.altId, privateKeyFlag)
+	_, err = findKeyPairFromSKI(p11lib, session, ski, privateKeyFlag)
 	if err != nil {
 		isPriv = false
 		logger.Debugf("Private key not found [%s] for SKI [%s], looking for Public key", err, hex.EncodeToString(ski))
 	}
 
-	publicKey, err := findKeyPairFromSKI(p11lib, session, ski, csp.altId, publicKeyFlag)
+	publicKey, err := findKeyPairFromSKI(p11lib, session, ski, publicKeyFlag)
 	if err != nil {
 		return nil, false, fmt.Errorf("Public key not found [%s] for SKI [%s]", err, hex.EncodeToString(ski))
 	}
@@ -215,22 +215,9 @@ func (csp *impl) generateECKey(curve asn1.ObjectIdentifier, ephemeral bool) (ski
 	session := csp.getSession()
 	defer csp.returnSession(session)
 
-	keylabel := ""
-	updateSKI := false
-	if csp.altId == "" {
-		// Generate using the SKI process and then make keypair immutable according to csp.immutable
-		keylabel = fmt.Sprintf("BCP%s", nextIDCtr().Text(16))
-		updateSKI = true
-	} else if csp.altId != "" && csp.immutable {
-		// Generate the key pair using AltID process.
-		// No need to worry about immutable since AltID is used with Write-Once HSMs
-		keylabel = csp.altId
-		updateSKI = false
-	} else if csp.altId != "" && !csp.immutable {
-		// Raise an error since AltID is used with Write-Once HSMs
-		// So cannot make support AltID with immutable = false.
-		return nil, nil, fmt.Errorf("Cannot generate a mutable key using AltID.")
-	}
+	id := nextIDCtr()
+	publabel := fmt.Sprintf("BCPUB%s", id.Text(16))
+	prvlabel := fmt.Sprintf("BCPRV%s", id.Text(16))
 
 	marshaledOID, err := asn1.Marshal(curve)
 	if err != nil {
@@ -243,9 +230,10 @@ func (csp *impl) generateECKey(curve asn1.ObjectIdentifier, ephemeral bool) (ski
 		pkcs11.NewAttribute(pkcs11.CKA_TOKEN, !ephemeral),
 		pkcs11.NewAttribute(pkcs11.CKA_VERIFY, true),
 		pkcs11.NewAttribute(pkcs11.CKA_EC_PARAMS, marshaledOID),
+		pkcs11.NewAttribute(pkcs11.CKA_PRIVATE, false),
 
-		pkcs11.NewAttribute(pkcs11.CKA_ID, []byte(keylabel)),
-		pkcs11.NewAttribute(pkcs11.CKA_LABEL, keylabel),
+		pkcs11.NewAttribute(pkcs11.CKA_ID, publabel),
+		pkcs11.NewAttribute(pkcs11.CKA_LABEL, publabel),
 	}
 
 	prvkeyT := []*pkcs11.Attribute{
@@ -255,8 +243,8 @@ func (csp *impl) generateECKey(curve asn1.ObjectIdentifier, ephemeral bool) (ski
 		pkcs11.NewAttribute(pkcs11.CKA_PRIVATE, true),
 		pkcs11.NewAttribute(pkcs11.CKA_SIGN, true),
 
-		pkcs11.NewAttribute(pkcs11.CKA_ID, []byte(keylabel)),
-		pkcs11.NewAttribute(pkcs11.CKA_LABEL, keylabel),
+		pkcs11.NewAttribute(pkcs11.CKA_ID, prvlabel),
+		pkcs11.NewAttribute(pkcs11.CKA_LABEL, prvlabel),
 
 		pkcs11.NewAttribute(pkcs11.CKA_EXTRACTABLE, false),
 		pkcs11.NewAttribute(pkcs11.CKA_SENSITIVE, true),
@@ -270,55 +258,50 @@ func (csp *impl) generateECKey(curve asn1.ObjectIdentifier, ephemeral bool) (ski
 		return nil, nil, fmt.Errorf("P11: keypair generate failed [%s]", err)
 	}
 
-	ecpt, _, err := ecPoint(p11lib, session, pub)
-	if err != nil {
-		return nil, nil, fmt.Errorf("Error querying EC-point: [%s]", err)
-	}
+	ecpt, _, _ := ecPoint(p11lib, session, pub)
 	hash := sha256.Sum256(ecpt)
 	ski = hash[:]
 
-	if updateSKI {
-		// set CKA_ID of the both keys to SKI(public key) and CKA_LABEL to hex string of SKI
-		setskiT := []*pkcs11.Attribute{
-			pkcs11.NewAttribute(pkcs11.CKA_ID, ski),
-			pkcs11.NewAttribute(pkcs11.CKA_LABEL, hex.EncodeToString(ski)),
+	// set CKA_ID of the both keys to SKI(public key) and CKA_LABEL to hex string of SKI
+	setskiT := []*pkcs11.Attribute{
+		pkcs11.NewAttribute(pkcs11.CKA_ID, ski),
+		pkcs11.NewAttribute(pkcs11.CKA_LABEL, hex.EncodeToString(ski)),
+	}
+
+	logger.Infof("Generated new P11 key, SKI %x\n", ski)
+	err = p11lib.SetAttributeValue(session, pub, setskiT)
+	if err != nil {
+		return nil, nil, fmt.Errorf("P11: set-ID-to-SKI[public] failed [%s]", err)
+	}
+
+	err = p11lib.SetAttributeValue(session, prv, setskiT)
+	if err != nil {
+		return nil, nil, fmt.Errorf("P11: set-ID-to-SKI[private] failed [%s]", err)
+	}
+
+	//Set CKA_Modifible to false for both public key and private keys
+	if csp.immutable {
+		setCKAModifiable := []*pkcs11.Attribute{
+			pkcs11.NewAttribute(pkcs11.CKA_MODIFIABLE, false),
 		}
 
-		logger.Infof("Generated new P11 key, SKI %x\n", ski)
-		err = p11lib.SetAttributeValue(session, pub, setskiT)
-		if err != nil {
-			return nil, nil, fmt.Errorf("P11: set-ID-to-SKI[public] failed [%s]", err)
+		_, pubCopyerror := p11lib.CopyObject(session, pub, setCKAModifiable)
+		if pubCopyerror != nil {
+			return nil, nil, fmt.Errorf("P11: Public Key copy failed with error [%s] . Please contact your HSM vendor", pubCopyerror)
 		}
 
-		err = p11lib.SetAttributeValue(session, prv, setskiT)
-		if err != nil {
-			return nil, nil, fmt.Errorf("P11: set-ID-to-SKI[private] failed [%s]", err)
+		pubKeyDestroyError := p11lib.DestroyObject(session, pub)
+		if pubKeyDestroyError != nil {
+			return nil, nil, fmt.Errorf("P11: Public Key destroy failed with error [%s]. Please contact your HSM vendor", pubCopyerror)
 		}
 
-		//Set CKA_Modifible to false for both public key and private keys
-		if csp.immutable {
-			setCKAModifiable := []*pkcs11.Attribute{
-				pkcs11.NewAttribute(pkcs11.CKA_MODIFIABLE, false),
-			}
-
-			_, pubCopyerror := p11lib.CopyObject(session, pub, setCKAModifiable)
-			if pubCopyerror != nil {
-				return nil, nil, fmt.Errorf("P11: Public Key copy failed with error [%s] . Please contact your HSM vendor", pubCopyerror)
-			}
-
-			pubKeyDestroyError := p11lib.DestroyObject(session, pub)
-			if pubKeyDestroyError != nil {
-				return nil, nil, fmt.Errorf("P11: Public Key destroy failed with error [%s]. Please contact your HSM vendor", pubCopyerror)
-			}
-
-			_, prvCopyerror := p11lib.CopyObject(session, prv, setCKAModifiable)
-			if prvCopyerror != nil {
-				return nil, nil, fmt.Errorf("P11: Private Key copy failed with error [%s]. Please contact your HSM vendor", prvCopyerror)
-			}
-			prvKeyDestroyError := p11lib.DestroyObject(session, prv)
-			if pubKeyDestroyError != nil {
-				return nil, nil, fmt.Errorf("P11: Private Key destroy failed with error [%s]. Please contact your HSM vendor", prvKeyDestroyError)
-			}
+		_, prvCopyerror := p11lib.CopyObject(session, prv, setCKAModifiable)
+		if prvCopyerror != nil {
+			return nil, nil, fmt.Errorf("P11: Private Key copy failed with error [%s]. Please contact your HSM vendor", prvCopyerror)
+		}
+		prvKeyDestroyError := p11lib.DestroyObject(session, prv)
+		if pubKeyDestroyError != nil {
+			return nil, nil, fmt.Errorf("P11: Private Key destroy failed with error [%s]. Please contact your HSM vendor", prvKeyDestroyError)
 		}
 	}
 
@@ -346,7 +329,7 @@ func (csp *impl) signP11ECDSA(ski []byte, msg []byte) (R, S *big.Int, err error)
 	session := csp.getSession()
 	defer csp.returnSession(session)
 
-	privateKey, err := findKeyPairFromSKI(p11lib, session, ski, csp.altId, privateKeyFlag)
+	privateKey, err := findKeyPairFromSKI(p11lib, session, ski, privateKeyFlag)
 	if err != nil {
 		return nil, nil, fmt.Errorf("Private key not found [%s]", err)
 	}
@@ -378,7 +361,7 @@ func (csp *impl) verifyP11ECDSA(ski []byte, msg []byte, R, S *big.Int, byteSize 
 
 	logger.Debugf("Verify ECDSA\n")
 
-	publicKey, err := findKeyPairFromSKI(p11lib, session, ski, csp.altId, publicKeyFlag)
+	publicKey, err := findKeyPairFromSKI(p11lib, session, ski, publicKeyFlag)
 	if err != nil {
 		return false, fmt.Errorf("Public key not found [%s]", err)
 	}
@@ -412,22 +395,16 @@ const (
 	publicKeyFlag  = false
 )
 
-func findKeyPairFromSKI(mod *pkcs11.Ctx, session pkcs11.SessionHandle, ski []byte, altID string, keyType bool) (*pkcs11.ObjectHandle, error) {
+func findKeyPairFromSKI(mod *pkcs11.Ctx, session pkcs11.SessionHandle, ski []byte, keyType bool) (*pkcs11.ObjectHandle, error) {
 	ktype := pkcs11.CKO_PUBLIC_KEY
 	if keyType == privateKeyFlag {
 		ktype = pkcs11.CKO_PRIVATE_KEY
 	}
 
-	keyId := []byte(altID)
-	if altID == "" {
-		keyId = ski
-	}
-
 	template := []*pkcs11.Attribute{
 		pkcs11.NewAttribute(pkcs11.CKA_CLASS, ktype),
-		pkcs11.NewAttribute(pkcs11.CKA_ID, keyId),
+		pkcs11.NewAttribute(pkcs11.CKA_ID, ski),
 	}
-
 	if err := mod.FindObjectsInit(session, template); err != nil {
 		return nil, err
 	}
@@ -561,7 +538,7 @@ func (csp *impl) getSecretValue(ski []byte) []byte {
 	session := csp.getSession()
 	defer csp.returnSession(session)
 
-	keyHandle, err := findKeyPairFromSKI(p11lib, session, ski, csp.altId, privateKeyFlag)
+	keyHandle, err := findKeyPairFromSKI(p11lib, session, ski, privateKeyFlag)
 	if err != nil {
 		logger.Warningf("P11: findKeyPairFromSKI [%s]\n", err)
 	}

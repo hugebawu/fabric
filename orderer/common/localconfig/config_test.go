@@ -24,27 +24,6 @@ func TestLoadGoodConfig(t *testing.T) {
 	assert.Nil(t, err, "Load good config returned unexpected error")
 }
 
-func TestMissingConfigValueOverridden(t *testing.T) {
-	t.Run("when the value is missing and not overridden", func(t *testing.T) {
-		cleanup := configtest.SetDevFabricConfigPath(t)
-		defer cleanup()
-		cfg, err := Load()
-		assert.NotNil(t, cfg, "Could not load config")
-		assert.NoError(t, err, "Load good config returned unexpected error")
-		assert.Nil(t, cfg.Kafka.TLS.ClientRootCAs)
-	})
-
-	t.Run("when the value is missing and is overridden", func(t *testing.T) {
-		os.Setenv("ORDERER_KAFKA_TLS_CLIENTROOTCAS", "msp/tlscacerts/tlsroot.pem")
-		cleanup := configtest.SetDevFabricConfigPath(t)
-		defer cleanup()
-		cfg, err := Load()
-		assert.NotNil(t, cfg, "Could not load config")
-		assert.NoError(t, err, "Load good config returned unexpected error")
-		assert.NotNil(t, cfg.Kafka.TLS.ClientRootCAs)
-	})
-}
-
 func TestLoadMissingConfigFile(t *testing.T) {
 	envVar1 := "FABRIC_CFG_PATH"
 	envVal1 := "invalid fabric cfg path"
@@ -153,15 +132,6 @@ func TestKafkaSASLPlain(t *testing.T) {
 	}
 }
 
-func TestClusterDefaults(t *testing.T) {
-	cleanup := configtest.SetDevFabricConfigPath(t)
-	defer cleanup()
-	cfg, err := Load()
-
-	assert.NoError(t, err)
-	assert.Equal(t, cfg.General.Cluster.ReplicationMaxRetries, Defaults.General.Cluster.ReplicationMaxRetries)
-}
-
 func TestSystemChannel(t *testing.T) {
 	cleanup := configtest.SetDevFabricConfigPath(t)
 	defer cleanup()
@@ -212,26 +182,4 @@ Consensus:
 	assert.NoError(t, err, "Failed to decode Consensus to struct")
 	assert.Equal(t, foo.Foo, "bar")
 	assert.Equal(t, foo.Hello.World, 42)
-}
-
-func TestConnectionTimeout(t *testing.T) {
-	t.Run("without connection timeout overridden", func(t *testing.T) {
-		cleanup := configtest.SetDevFabricConfigPath(t)
-		defer cleanup()
-		cfg, err := Load()
-		assert.NotNil(t, cfg, "Could not load config")
-		assert.NoError(t, err, "Load good config returned unexpected error")
-		assert.Equal(t, cfg.General.ConnectionTimeout, 0*time.Second)
-	})
-
-	t.Run("with connection timeout overridden", func(t *testing.T) {
-		os.Setenv("ORDERER_GENERAL_CONNECTIONTIMEOUT", "10s")
-		defer os.Unsetenv("ORDERER_GENERAL_CONNECTIONTIMEOUT")
-		cleanup := configtest.SetDevFabricConfigPath(t)
-		defer cleanup()
-		cfg, err := Load()
-		assert.NotNil(t, cfg, "Could not load config")
-		assert.NoError(t, err, "Load good config returned unexpected error")
-		assert.Equal(t, cfg.General.ConnectionTimeout, 10*time.Second)
-	})
 }

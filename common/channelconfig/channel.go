@@ -86,12 +86,11 @@ func NewChannelConfig(channelGroup *cb.ConfigGroup) (*ChannelConfig, error) {
 		return nil, errors.Wrap(err, "failed to deserialize values")
 	}
 
-	capabilities := cc.Capabilities()
-
-	if err := cc.Validate(capabilities); err != nil {
+	if err := cc.Validate(); err != nil {
 		return nil, err
 	}
 
+	capabilities := cc.Capabilities()
 	mspConfigHandler := NewMSPConfigHandler(capabilities.MSPVersion())
 
 	var err error
@@ -100,7 +99,7 @@ func NewChannelConfig(channelGroup *cb.ConfigGroup) (*ChannelConfig, error) {
 		case ApplicationGroupKey:
 			cc.appConfig, err = NewApplicationConfig(group, mspConfigHandler)
 		case OrdererGroupKey:
-			cc.ordererConfig, err = NewOrdererConfig(group, mspConfigHandler, capabilities)
+			cc.ordererConfig, err = NewOrdererConfig(group, mspConfigHandler)
 		case ConsortiumsGroupKey:
 			cc.consortiumsConfig, err = NewConsortiumsConfig(group, mspConfigHandler)
 		default:
@@ -164,18 +163,15 @@ func (cc *ChannelConfig) Capabilities() ChannelCapabilities {
 }
 
 // Validate inspects the generated configuration protos and ensures that the values are correct
-func (cc *ChannelConfig) Validate(channelCapabilities ChannelCapabilities) error {
+func (cc *ChannelConfig) Validate() error {
 	for _, validator := range []func() error{
 		cc.validateHashingAlgorithm,
 		cc.validateBlockDataHashingStructure,
+		cc.validateOrdererAddresses,
 	} {
 		if err := validator(); err != nil {
 			return err
 		}
-	}
-
-	if !channelCapabilities.OrgSpecificOrdererEndpoints() {
-		return cc.validateOrdererAddresses()
 	}
 
 	return nil

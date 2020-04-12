@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/hyperledger/fabric/common/channelconfig"
-	deliverclient "github.com/hyperledger/fabric/core/deliverservice"
 	"github.com/hyperledger/fabric/gossip/util"
 	"github.com/hyperledger/fabric/protos/peer"
 )
@@ -23,33 +22,20 @@ func init() {
 }
 
 type mockReceiver struct {
-	ordererEndpointsByOrg map[string][]string
-	appOrgs               map[string]channelconfig.ApplicationOrg
-	sequence              uint64
+	orgs     map[string]channelconfig.ApplicationOrg
+	sequence uint64
 }
 
 func (mr *mockReceiver) updateAnchors(config Config) {
-	logger.Debugf("[TEST] Setting config to %d %v", config.Sequence(), config.ApplicationOrgs())
-	mr.appOrgs = config.ApplicationOrgs()
+	logger.Debugf("[TEST] Setting config to %d %v", config.Sequence(), config.Organizations())
+	mr.orgs = config.Organizations()
 	mr.sequence = config.Sequence()
 }
 
-func (mr *mockReceiver) updateEndpoints(chainID string, _ deliverclient.ConnectionCriteria) {
+func (mr *mockReceiver) updateEndpoints(chainID string, endpoints []string) {
 }
 
 type mockConfig mockReceiver
-
-func (mc *mockConfig) OrdererAddressesByOrgs() map[string][]string {
-	return mc.ordererEndpointsByOrg
-}
-
-func (mc *mockConfig) OrdererOrgs() []string {
-	return nil
-}
-
-func (mc *mockConfig) ApplicationOrgs() ApplicationOrgs {
-	return mc.appOrgs
-}
 
 func (mc *mockConfig) OrdererAddresses() []string {
 	return []string{"localhost:7050"}
@@ -57,6 +43,10 @@ func (mc *mockConfig) OrdererAddresses() []string {
 
 func (mc *mockConfig) Sequence() uint64 {
 	return mc.sequence
+}
+
+func (mc *mockConfig) Organizations() map[string]channelconfig.ApplicationOrg {
+	return mc.orgs
 }
 
 func (mc *mockConfig) ChainID() string {
@@ -68,7 +58,7 @@ const testOrgID = "testID"
 func TestInitialUpdate(t *testing.T) {
 	mc := &mockConfig{
 		sequence: 7,
-		appOrgs: map[string]channelconfig.ApplicationOrg{
+		orgs: map[string]channelconfig.ApplicationOrg{
 			testOrgID: &appGrp{
 				anchorPeers: []*peer.AnchorPeer{{Port: 9}},
 			},
@@ -93,7 +83,7 @@ func TestSecondUpdate(t *testing.T) {
 	}
 	mc := &mockConfig{
 		sequence: 7,
-		appOrgs:  appGrps,
+		orgs:     appGrps,
 	}
 
 	mr := &mockReceiver{}
@@ -116,7 +106,7 @@ func TestSecondUpdate(t *testing.T) {
 func TestSecondSameUpdate(t *testing.T) {
 	mc := &mockConfig{
 		sequence: 7,
-		appOrgs: map[string]channelconfig.ApplicationOrg{
+		orgs: map[string]channelconfig.ApplicationOrg{
 			testOrgID: &appGrp{
 				anchorPeers: []*peer.AnchorPeer{{Port: 9}},
 			},
@@ -128,14 +118,14 @@ func TestSecondSameUpdate(t *testing.T) {
 	ce := newConfigEventer(mr)
 	ce.ProcessConfigUpdate(mc)
 	mr.sequence = 0
-	mr.appOrgs = nil
+	mr.orgs = nil
 	ce.ProcessConfigUpdate(mc)
 
 	if mr.sequence != 0 {
 		t.Error("Should not have updated sequence when reprocessing same config")
 	}
 
-	if mr.appOrgs != nil {
+	if mr.orgs != nil {
 		t.Error("Should not have updated anchor peers when reprocessing same config")
 	}
 }
@@ -143,7 +133,7 @@ func TestSecondSameUpdate(t *testing.T) {
 func TestUpdatedSeqOnly(t *testing.T) {
 	mc := &mockConfig{
 		sequence: 7,
-		appOrgs: map[string]channelconfig.ApplicationOrg{
+		orgs: map[string]channelconfig.ApplicationOrg{
 			testOrgID: &appGrp{
 				anchorPeers: []*peer.AnchorPeer{{Port: 9}},
 			},
@@ -161,7 +151,7 @@ func TestUpdatedSeqOnly(t *testing.T) {
 		t.Errorf("Should not have updated sequence when reprocessing same config")
 	}
 
-	if !reflect.DeepEqual(mr.appOrgs, mc.appOrgs) {
+	if !reflect.DeepEqual(mr.orgs, mc.orgs) {
 		t.Errorf("Should not have cleared anchor peers when reprocessing newer config with higher sequence")
 	}
 }

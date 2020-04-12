@@ -14,6 +14,7 @@ import (
 
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 )
 
@@ -59,7 +60,6 @@ func NewGRPCClient(config ClientConfig) (*GRPCClient, error) {
 	// Unless asynchronous connect is set, make connection establishment blocking.
 	if !config.AsyncConnect {
 		client.dialOpts = append(client.dialOpts, grpc.WithBlock())
-		client.dialOpts = append(client.dialOpts, grpc.FailOnNonTempDialError(true))
 	}
 	client.timeout = config.Timeout
 	// set send/recv message size to package defaults
@@ -105,13 +105,6 @@ func (client *GRPCClient) parseSecureOptions(opts *SecureOptions) error {
 				"are required when using mutual TLS")
 		}
 	}
-
-	if opts.TimeShift > 0 {
-		client.tlsConfig.Time = func() time.Time {
-			return time.Now().Add((-1) * opts.TimeShift)
-		}
-	}
-
 	return nil
 }
 
@@ -165,13 +158,10 @@ func (client *GRPCClient) SetServerRootCAs(serverRoots [][]byte) error {
 	return nil
 }
 
-// TLSOption changes the given TLS config
-type TLSOption func(tlsConfig *tls.Config)
-
 // NewConnection returns a grpc.ClientConn for the target address and
 // overrides the server name used to verify the hostname on the
 // certificate returned by a server when using TLS
-func (client *GRPCClient) NewConnection(address string, serverNameOverride string, tlsOptions ...TLSOption) (
+func (client *GRPCClient) NewConnection(address string, serverNameOverride string) (
 	*grpc.ClientConn, error) {
 
 	var dialOpts []grpc.DialOption
@@ -185,7 +175,7 @@ func (client *GRPCClient) NewConnection(address string, serverNameOverride strin
 		client.tlsConfig.ServerName = serverNameOverride
 		dialOpts = append(dialOpts,
 			grpc.WithTransportCredentials(
-				&DynamicClientCredentials{TLSConfig: client.tlsConfig, TLSOptions: tlsOptions}))
+				credentials.NewTLS(client.tlsConfig)))
 	} else {
 		dialOpts = append(dialOpts, grpc.WithInsecure())
 	}

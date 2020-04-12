@@ -22,9 +22,6 @@ type ConsenterSupport struct {
 	// SharedConfigVal is the value returned by SharedConfig()
 	SharedConfigVal *mockconfig.Orderer
 
-	// SharedConfigVal is the value returned by ChannelConfig()
-	ChannelConfigVal *mockconfig.Channel
-
 	// BlockCutterVal is the value returned by BlockCutter()
 	BlockCutterVal *mockblockcutter.Receiver
 
@@ -86,11 +83,6 @@ func (mcs *ConsenterSupport) SharedConfig() channelconfig.Orderer {
 	return mcs.SharedConfigVal
 }
 
-// ChannelConfig returns ChannelConfigVal
-func (mcs *ConsenterSupport) ChannelConfig() channelconfig.Channel {
-	return mcs.ChannelConfigVal
-}
-
 // CreateNextBlock creates a simple block structure with the given data
 func (mcs *ConsenterSupport) CreateNextBlock(data []*cb.Envelope) *cb.Block {
 	block := cb.NewBlock(0, nil)
@@ -108,7 +100,8 @@ func (mcs *ConsenterSupport) WriteBlock(block *cb.Block, encodedMetadataValue []
 	if encodedMetadataValue != nil {
 		block.Metadata.Metadata[cb.BlockMetadataIndex_ORDERER] = utils.MarshalOrPanic(&cb.Metadata{Value: encodedMetadataValue})
 	}
-	mcs.Append(block)
+	mcs.HeightVal++
+	mcs.Blocks <- block
 }
 
 // WriteConfigBlock calls WriteBlock
@@ -164,12 +157,4 @@ func (mcs *ConsenterSupport) Sequence() uint64 {
 // VerifyBlockSignature verifies a signature of a block
 func (mcs *ConsenterSupport) VerifyBlockSignature(_ []*cb.SignedData, _ *cb.ConfigEnvelope) error {
 	return mcs.BlockVerificationErr
-}
-
-// Append appends a new block to the ledger in its raw form,
-// unlike WriteBlock that also mutates its metadata.
-func (mcs *ConsenterSupport) Append(block *cb.Block) error {
-	mcs.HeightVal++
-	mcs.Blocks <- block
-	return nil
 }

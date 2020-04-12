@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	docker "github.com/fsouza/go-dockerclient"
+	"github.com/fsouza/go-dockerclient"
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/cauthdsl"
 	"github.com/hyperledger/fabric/integration/nwo"
@@ -177,10 +177,10 @@ var _ = Describe("DiscoveryService", func() {
 		Expect(discovered[0].Layouts[0].QuantitiesByGroup).To(ConsistOf(uint32(1), uint32(1), uint32(1)))
 
 		By("changing the channel policy")
-		currentConfig := nwo.GetConfig(network, network.Peer("org3", "peer0"), orderer, "testchannel")
+		currentConfig := nwo.GetConfigBlock(network, network.Peer("org3", "peer0"), orderer, "testchannel")
 		updatedConfig := proto.Clone(currentConfig).(*common.Config)
 		updatedConfig.ChannelGroup.Groups["Application"].Groups["org3"].Policies["Writers"].Policy.Value = utils.MarshalOrPanic(cauthdsl.SignedByMspAdmin("Org3MSP"))
-		nwo.UpdateConfig(network, orderer, "testchannel", currentConfig, updatedConfig, true, network.Peer("org3", "peer0"))
+		nwo.UpdateConfig(network, orderer, "testchannel", currentConfig, updatedConfig, network.Peer("org3", "peer0"))
 
 		By("trying to discover peers as an org 3 member")
 		endorsers = commands.Endorsers{

@@ -44,10 +44,10 @@
 #   - docker-tag-stable - re-tags the images made by 'make docker' with the :stable tag
 #   - help-docs - generate the command reference docs
 
-BASE_VERSION = 1.4.7
-PREV_VERSION = 1.4.6
+BASE_VERSION = 1.4.0
+PREV_VERSION = 1.4.0-rc2
 CHAINTOOL_RELEASE=1.1.3
-BASEIMAGE_RELEASE=0.4.18
+BASEIMAGE_RELEASE=0.4.14
 
 # Allow to build as a submodule setting the main project to
 # the PROJECT_NAME env variable, for example,
@@ -59,6 +59,7 @@ PROJECT_NAME = hyperledger/fabric
 endif
 
 BUILD_DIR ?= .build
+NEXUS_REPO = nexus3.hyperledger.org:10001/hyperledger
 
 EXTRA_VERSION ?= $(shell git rev-parse --short HEAD)
 PROJECT_VERSION=$(BASE_VERSION)-snapshot-$(EXTRA_VERSION)
@@ -80,7 +81,7 @@ GO_LDFLAGS = $(patsubst %,-X $(PKGNAME)/common/metadata.%,$(METADATA_VAR))
 
 GO_TAGS ?=
 
-CHAINTOOL_URL ?= https://hyperledger.jfrog.io/hyperledger/fabric-maven/org/hyperledger/fabric-chaintool/$(CHAINTOOL_RELEASE)/fabric-chaintool-$(CHAINTOOL_RELEASE).jar
+CHAINTOOL_URL ?= https://nexus.hyperledger.org/content/repositories/releases/org/hyperledger/fabric/hyperledger-fabric/chaintool-$(CHAINTOOL_RELEASE)/hyperledger-fabric-chaintool-$(CHAINTOOL_RELEASE).jar
 
 export GO_LDFLAGS GO_TAGS
 
@@ -230,12 +231,10 @@ $(BUILD_DIR)/%/chaintool: Makefile
 $(BUILD_DIR)/docker/bin/%: $(PROJECT_FILES)
 	$(eval TARGET = ${patsubst $(BUILD_DIR)/docker/bin/%,%,${@}})
 	@echo "Building $@"
-	@mkdir -p $(BUILD_DIR)/docker/bin $(BUILD_DIR)/docker/$(TARGET)/pkg $(BUILD_DIR)/docker/gocache
+	@mkdir -p $(BUILD_DIR)/docker/bin $(BUILD_DIR)/docker/$(TARGET)/pkg
 	@$(DRUN) \
 		-v $(abspath $(BUILD_DIR)/docker/bin):/opt/gopath/bin \
 		-v $(abspath $(BUILD_DIR)/docker/$(TARGET)/pkg):/opt/gopath/pkg \
-		-v $(abspath $(BUILD_DIR)/docker/gocache):/opt/gopath/cache \
-		-e GOCACHE=/opt/gopath/cache \
 		$(BASE_DOCKER_NS)/fabric-baseimage:$(BASE_DOCKER_TAG) \
 		go install -tags "$(GO_TAGS)" -ldflags "$(DOCKER_GO_LDFLAGS)" $(pkgmap.$(@F))
 	@touch $@
@@ -250,12 +249,10 @@ $(BUILD_DIR)/docker/gotools/bin/protoc-gen-go: $(BUILD_DIR)/docker/gotools
 
 $(BUILD_DIR)/docker/gotools: gotools.mk
 	@echo "Building dockerized gotools"
-	@mkdir -p $@/bin $@/obj $(BUILD_DIR)/docker/gocache
+	@mkdir -p $@/bin $@/obj
 	@$(DRUN) \
 		-v $(abspath $@):/opt/gotools \
 		-w /opt/gopath/src/$(PKGNAME) \
-		-v $(abspath $(BUILD_DIR)/docker/gocache):/opt/gopath/cache \
-		-e GOCACHE=/opt/gopath/cache \
 		$(BASE_DOCKER_NS)/fabric-baseimage:$(BASE_DOCKER_TAG) \
 		make -f gotools.mk GOTOOLS_BINDIR=/opt/gotools/bin GOTOOLS_GOPATH=/opt/gotools/obj
 
@@ -335,22 +332,22 @@ release-all: $(patsubst %,release/%, $(RELEASE_PLATFORMS))
 release/%: GO_LDFLAGS=-X $(pkgmap.$(@F))/metadata.CommitSHA=$(EXTRA_VERSION)
 
 release/windows-amd64: GOOS=windows
-release/windows-amd64: $(patsubst %,release/windows-amd64/bin/%, $(RELEASE_PKGS))
+release/windows-amd64: $(patsubst %,release/windows-amd64/bin/%, $(RELEASE_PKGS)) release/windows-amd64/install
 
 release/darwin-amd64: GOOS=darwin
-release/darwin-amd64: $(patsubst %,release/darwin-amd64/bin/%, $(RELEASE_PKGS))
+release/darwin-amd64: $(patsubst %,release/darwin-amd64/bin/%, $(RELEASE_PKGS)) release/darwin-amd64/install
 
 release/linux-amd64: GOOS=linux
-release/linux-amd64: $(patsubst %,release/linux-amd64/bin/%, $(RELEASE_PKGS))
+release/linux-amd64: $(patsubst %,release/linux-amd64/bin/%, $(RELEASE_PKGS)) release/linux-amd64/install
 
 release/%-amd64: GOARCH=amd64
 release/linux-%: GOOS=linux
 
 release/linux-s390x: GOARCH=s390x
-release/linux-s390x: $(patsubst %,release/linux-s390x/bin/%, $(RELEASE_PKGS))
+release/linux-s390x: $(patsubst %,release/linux-s390x/bin/%, $(RELEASE_PKGS)) release/linux-s390x/install
 
 release/linux-ppc64le: GOARCH=ppc64le
-release/linux-ppc64le: $(patsubst %,release/linux-ppc64le/bin/%, $(RELEASE_PKGS))
+release/linux-ppc64le: $(patsubst %,release/linux-ppc64le/bin/%, $(RELEASE_PKGS)) release/linux-ppc64le/install
 
 release/%/bin/configtxlator: $(PROJECT_FILES)
 	@echo "Building $@ for $(GOOS)-$(GOARCH)"
@@ -390,6 +387,16 @@ release/%/bin/peer: $(PROJECT_FILES)
 	@echo "Building $@ for $(GOOS)-$(GOARCH)"
 	mkdir -p $(@D)
 	$(CGO_FLAGS) GOOS=$(GOOS) GOARCH=$(GOARCH) go build -o $(abspath $@) -tags "$(GO_TAGS)" -ldflags "$(GO_LDFLAGS)" $(pkgmap.$(@F))
+
+release/%/install: $(PROJECT_FILES)
+	mkdir -p $(@D)/bin
+	@cat $(@D)/../templates/get-docker-images.in \
+		| sed -e 's|_NS_|$(DOCKER_NS)|g' \
+		| sed -e 's|_ARCH_|$(GOARCH)|g' \
+		| sed -e 's|_VERSION_|$(PROJECT_VERSION)|g' \
+		| sed -e 's|_BASE_DOCKER_TAG_|$(BASE_DOCKER_TAG)|g' \
+		> $(@D)/bin/get-docker-images.sh
+		@chmod +x $(@D)/bin/get-docker-images.sh
 
 .PHONY: dist
 dist: dist-clean dist/$(MARCH)

@@ -1,6 +1,17 @@
 /*
-Copyright IBM Corp. All Rights Reserved.
-SPDX-License-Identifier: Apache-2.0
+Copyright IBM Corp. 2016 All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+		 http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
 
 package fsblkstorage
@@ -10,7 +21,6 @@ import (
 	ledgerutil "github.com/hyperledger/fabric/common/ledger/util"
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/utils"
-	"github.com/pkg/errors"
 )
 
 type serializedBlockInfo struct {
@@ -35,7 +45,7 @@ func serializeBlock(block *common.Block) ([]byte, *serializedBlockInfo, error) {
 	if err = addHeaderBytes(block.Header, buf); err != nil {
 		return nil, nil, err
 	}
-	if info.txOffsets, err = addDataBytesAndConstructTxIndexInfo(block.Data, buf); err != nil {
+	if info.txOffsets, err = addDataBytes(block.Data, buf); err != nil {
 		return nil, nil, err
 	}
 	if err = addMetadataBytes(block.Metadata, buf); err != nil {
@@ -77,37 +87,37 @@ func extractSerializedBlockInfo(serializedBlockBytes []byte) (*serializedBlockIn
 	if err != nil {
 		return nil, err
 	}
+
 	return info, nil
 }
 
 func addHeaderBytes(blockHeader *common.BlockHeader, buf *proto.Buffer) error {
 	if err := buf.EncodeVarint(blockHeader.Number); err != nil {
-		return errors.Wrapf(err, "error encoding the block number [%d]", blockHeader.Number)
+		return err
 	}
 	if err := buf.EncodeRawBytes(blockHeader.DataHash); err != nil {
-		return errors.Wrapf(err, "error encoding the data hash [%v]", blockHeader.DataHash)
+		return err
 	}
 	if err := buf.EncodeRawBytes(blockHeader.PreviousHash); err != nil {
-		return errors.Wrapf(err, "error encoding the previous hash [%v]", blockHeader.PreviousHash)
+		return err
 	}
 	return nil
 }
 
-func addDataBytesAndConstructTxIndexInfo(blockData *common.BlockData, buf *proto.Buffer) ([]*txindexInfo, error) {
+func addDataBytes(blockData *common.BlockData, buf *proto.Buffer) ([]*txindexInfo, error) {
 	var txOffsets []*txindexInfo
 
 	if err := buf.EncodeVarint(uint64(len(blockData.Data))); err != nil {
-		return nil, errors.Wrap(err, "error encoding the length of block data")
+		return nil, err
 	}
 	for _, txEnvelopeBytes := range blockData.Data {
 		offset := len(buf.Bytes())
-		txid, err := utils.GetOrComputeTxIDFromEnvelope(txEnvelopeBytes)
+		txid, err := extractTxID(txEnvelopeBytes)
 		if err != nil {
-			logger.Warningf("error while extracting txid from tx envelope bytes during serialization of block. Ignoring this error as this is caused by a malformed transaction. Error:%s",
-				err)
+			return nil, err
 		}
 		if err := buf.EncodeRawBytes(txEnvelopeBytes); err != nil {
-			return nil, errors.Wrap(err, "error encoding the transaction envelope")
+			return nil, err
 		}
 		idxInfo := &txindexInfo{txID: txid, loc: &locPointer{offset, len(buf.Bytes()) - offset}}
 		txOffsets = append(txOffsets, idxInfo)
@@ -121,11 +131,11 @@ func addMetadataBytes(blockMetadata *common.BlockMetadata, buf *proto.Buffer) er
 		numItems = uint64(len(blockMetadata.Metadata))
 	}
 	if err := buf.EncodeVarint(numItems); err != nil {
-		return errors.Wrap(err, "error encoding the length of metadata")
+		return err
 	}
 	for _, b := range blockMetadata.Metadata {
 		if err := buf.EncodeRawBytes(b); err != nil {
-			return errors.Wrap(err, "error encoding the block metadata")
+			return err
 		}
 	}
 	return nil
@@ -135,13 +145,13 @@ func extractHeader(buf *ledgerutil.Buffer) (*common.BlockHeader, error) {
 	header := &common.BlockHeader{}
 	var err error
 	if header.Number, err = buf.DecodeVarint(); err != nil {
-		return nil, errors.Wrap(err, "error decoding the block number")
+		return nil, err
 	}
 	if header.DataHash, err = buf.DecodeRawBytes(false); err != nil {
-		return nil, errors.Wrap(err, "error decoding the data hash")
+		return nil, err
 	}
 	if header.PreviousHash, err = buf.DecodeRawBytes(false); err != nil {
-		return nil, errors.Wrap(err, "error decoding the previous hash")
+		return nil, err
 	}
 	if len(header.PreviousHash) == 0 {
 		header.PreviousHash = nil
@@ -156,19 +166,17 @@ func extractData(buf *ledgerutil.Buffer) (*common.BlockData, []*txindexInfo, err
 	var err error
 
 	if numItems, err = buf.DecodeVarint(); err != nil {
-		return nil, nil, errors.Wrap(err, "error decoding the length of block data")
+		return nil, nil, err
 	}
 	for i := uint64(0); i < numItems; i++ {
 		var txEnvBytes []byte
 		var txid string
 		txOffset := buf.GetBytesConsumed()
 		if txEnvBytes, err = buf.DecodeRawBytes(false); err != nil {
-			return nil, nil, errors.Wrap(err, "error decoding the transaction enevelope")
+			return nil, nil, err
 		}
-		if txid, err = utils.GetOrComputeTxIDFromEnvelope(txEnvBytes); err != nil {
-			logger.Warningf("error while extracting txid from tx envelope bytes during deserialization of block. Ignoring this error as this is caused by a malformed transaction. Error:%s",
-				err)
-
+		if txid, err = extractTxID(txEnvBytes); err != nil {
+			return nil, nil, err
 		}
 		data.Data = append(data.Data, txEnvBytes)
 		idxInfo := &txindexInfo{txID: txid, loc: &locPointer{txOffset, buf.GetBytesConsumed() - txOffset}}
@@ -183,13 +191,29 @@ func extractMetadata(buf *ledgerutil.Buffer) (*common.BlockMetadata, error) {
 	var metadataEntry []byte
 	var err error
 	if numItems, err = buf.DecodeVarint(); err != nil {
-		return nil, errors.Wrap(err, "error decoding the length of block metadata")
+		return nil, err
 	}
 	for i := uint64(0); i < numItems; i++ {
 		if metadataEntry, err = buf.DecodeRawBytes(false); err != nil {
-			return nil, errors.Wrap(err, "error decoding the block metadata")
+			return nil, err
 		}
 		metadata.Metadata = append(metadata.Metadata, metadataEntry)
 	}
 	return metadata, nil
+}
+
+func extractTxID(txEnvelopBytes []byte) (string, error) {
+	txEnvelope, err := utils.GetEnvelopeFromBlock(txEnvelopBytes)
+	if err != nil {
+		return "", err
+	}
+	txPayload, err := utils.GetPayload(txEnvelope)
+	if err != nil {
+		return "", nil
+	}
+	chdr, err := utils.UnmarshalChannelHeader(txPayload.Header.ChannelHeader)
+	if err != nil {
+		return "", err
+	}
+	return chdr.TxId, nil
 }

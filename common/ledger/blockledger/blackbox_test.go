@@ -14,7 +14,6 @@ import (
 	"github.com/hyperledger/fabric/common/ledger/blockledger"
 	cb "github.com/hyperledger/fabric/protos/common"
 	ab "github.com/hyperledger/fabric/protos/orderer"
-	"github.com/hyperledger/fabric/protos/utils"
 )
 
 type ledgerTestable interface {
@@ -77,8 +76,7 @@ func testReinitialization(lf ledgerTestFactory, t *testing.T) {
 		return
 	}
 	olf, oli := lf.New()
-	envelope := getSampleEnvelopeWithSignatureHeader()
-	aBlock := blockledger.CreateNextBlock(oli, []*cb.Envelope{envelope})
+	aBlock := blockledger.CreateNextBlock(oli, []*cb.Envelope{{Payload: []byte("My Data")}})
 	err := oli.Append(aBlock)
 	if err != nil {
 		t.Fatalf("Error appending block: %s", err)
@@ -110,8 +108,7 @@ func testAddition(lf ledgerTestFactory, t *testing.T) {
 	}
 	prevHash := genesis.Header.Hash()
 
-	envelope := getSampleEnvelopeWithSignatureHeader()
-	li.Append(blockledger.CreateNextBlock(li, []*cb.Envelope{envelope}))
+	li.Append(blockledger.CreateNextBlock(li, []*cb.Envelope{{Payload: []byte("My Data")}}))
 	if li.Height() != 2 {
 		t.Fatalf("Block height should be 2")
 	}
@@ -130,8 +127,7 @@ func TestRetrieval(t *testing.T) {
 
 func testRetrieval(lf ledgerTestFactory, t *testing.T) {
 	_, li := lf.New()
-	envelope := getSampleEnvelopeWithSignatureHeader()
-	li.Append(blockledger.CreateNextBlock(li, []*cb.Envelope{envelope}))
+	li.Append(blockledger.CreateNextBlock(li, []*cb.Envelope{{Payload: []byte("My Data")}}))
 	it, num := li.Iterator(&ab.SeekPosition{Type: &ab.SeekPosition_Oldest{}})
 	defer it.Close()
 	if num != 0 {
@@ -167,8 +163,7 @@ func testBlockedRetrieval(lf ledgerTestFactory, t *testing.T) {
 		t.Fatalf("Expected block iterator at 1, but got %d", num)
 	}
 
-	envelope := getSampleEnvelopeWithSignatureHeader()
-	li.Append(blockledger.CreateNextBlock(li, []*cb.Envelope{envelope}))
+	li.Append(blockledger.CreateNextBlock(li, []*cb.Envelope{{Payload: []byte("My Data")}}))
 
 	block, status := it.Next()
 	if status != cb.Status_SUCCESS {
@@ -188,15 +183,18 @@ func testMultichain(lf ledgerTestFactory, t *testing.T) {
 	chain1 := "chain1"
 	chain2 := "chain2"
 
+	c1p1 := []byte("c1 payload1")
+	c1p2 := []byte("c1 payload2")
+
+	c2p1 := []byte("c2 payload1")
+
 	c1, err := f.GetOrCreate(chain1)
 	if err != nil {
 		t.Fatalf("Error creating chain1: %s", err)
 	}
 
-	envelope1 := getSampleEnvelopeWithSignatureHeader()
-	c1.Append(blockledger.CreateNextBlock(c1, []*cb.Envelope{envelope1}))
-	envelope2 := getSampleEnvelopeWithSignatureHeader()
-	c1b1 := blockledger.CreateNextBlock(c1, []*cb.Envelope{envelope2})
+	c1.Append(blockledger.CreateNextBlock(c1, []*cb.Envelope{{Payload: c1p1}}))
+	c1b1 := blockledger.CreateNextBlock(c1, []*cb.Envelope{{Payload: c1p2}})
 	c1.Append(c1b1)
 
 	if c1.Height() != 2 {
@@ -207,8 +205,7 @@ func testMultichain(lf ledgerTestFactory, t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error creating chain2: %s", err)
 	}
-	envelope3 := getSampleEnvelopeWithSignatureHeader()
-	c2b0 := c2.Append(blockledger.CreateNextBlock(c2, []*cb.Envelope{envelope3}))
+	c2b0 := c2.Append(blockledger.CreateNextBlock(c2, []*cb.Envelope{{Payload: c2p1}}))
 
 	if c2.Height() != 1 {
 		t.Fatalf("Block height for c2 should be 1")
@@ -231,15 +228,4 @@ func testMultichain(lf ledgerTestFactory, t *testing.T) {
 	if b := blockledger.GetBlock(c2, 0); reflect.DeepEqual(c2b0, b) {
 		t.Fatalf("Did not properly store block 1 on chain 1")
 	}
-}
-
-func getSampleEnvelopeWithSignatureHeader() *cb.Envelope {
-	nonce := utils.CreateNonceOrPanic()
-	sighdr := &cb.SignatureHeader{Nonce: nonce}
-	sighdrBytes := utils.MarshalOrPanic(sighdr)
-
-	header := &cb.Header{SignatureHeader: sighdrBytes}
-	payload := &cb.Payload{Header: header}
-	payloadBytes := utils.MarshalOrPanic(payload)
-	return &cb.Envelope{Payload: payloadBytes}
 }

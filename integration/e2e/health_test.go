@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"net"
 	"net/http"
 	"os"
 	"syscall"
@@ -18,7 +17,6 @@ import (
 	docker "github.com/fsouza/go-dockerclient"
 	"github.com/hyperledger/fabric-lib-go/healthz"
 	"github.com/hyperledger/fabric/integration/nwo"
-	"github.com/hyperledger/fabric/integration/runner"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/tedsuo/ifrit"
@@ -41,10 +39,7 @@ var _ = Describe("Health", func() {
 		client, err = docker.NewClientFromEnv()
 		Expect(err).NotTo(HaveOccurred())
 
-		config := nwo.BasicKafka()
-		config.Consensus.Brokers = 3
-
-		network = nwo.New(config, testDir, client, BasePort(), components)
+		network = nwo.New(nwo.BasicSolo(), testDir, client, BasePort(), components)
 		network.GenerateConfigTree()
 		network.Bootstrap()
 	})
@@ -81,6 +76,7 @@ var _ = Describe("Health", func() {
 			))
 		})
 	})
+<<<<<<< HEAD
 
 	Describe("CouchDB health checks", func() {
 		var (
@@ -244,24 +240,19 @@ var _ = Describe("Health", func() {
 			})
 		})
 	})
+=======
+>>>>>>> tag-v1.4.0
 })
 
-func DoHealthCheck(client *http.Client, url string) (int, *healthz.HealthStatus) {
+func DoHealthCheck(client *http.Client, url string) (int, healthz.HealthStatus) {
 	resp, err := client.Get(url)
 	Expect(err).NotTo(HaveOccurred())
-
 	bodyBytes, err := ioutil.ReadAll(resp.Body)
 	Expect(err).NotTo(HaveOccurred())
 	resp.Body.Close()
 
-	// This occurs when a request to the health check server times out, no body is
-	// returned when a timeout occurs
-	if len(bodyBytes) == 0 {
-		return resp.StatusCode, nil
-	}
-
-	healthStatus := &healthz.HealthStatus{}
-	err = json.Unmarshal(bodyBytes, healthStatus)
+	var healthStatus healthz.HealthStatus
+	err = json.Unmarshal(bodyBytes, &healthStatus)
 	Expect(err).NotTo(HaveOccurred())
 
 	return resp.StatusCode, healthStatus

@@ -136,14 +136,6 @@ type configMock struct {
 	orgs2AppOrgs map[string]channelconfig.ApplicationOrg
 }
 
-func (c *configMock) OrdererAddressesByOrgs() map[string][]string {
-	return nil
-}
-
-func (c *configMock) OrdererOrgs() []string {
-	return nil
-}
-
 func (c *configMock) OrdererAddresses() []string {
 	return []string{"localhost:7050"}
 }
@@ -152,7 +144,7 @@ func (*configMock) ChainID() string {
 	return "A"
 }
 
-func (c *configMock) ApplicationOrgs() ApplicationOrgs {
+func (c *configMock) Organizations() map[string]channelconfig.ApplicationOrg {
 	return c.orgs2AppOrgs
 }
 

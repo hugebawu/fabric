@@ -60,8 +60,8 @@ type ServerConfig struct {
 	UnaryInterceptors []grpc.UnaryServerInterceptor
 	// Logger specifies the logger the server will use
 	Logger *flogging.FabricLogger
-	// ServerStatsHandler should be set if metrics on connections are to be reported.
-	ServerStatsHandler *ServerStatsHandler
+	// Metrics Provider
+	MetricsProvider metrics.Provider
 }
 
 // ClientConfig defines the parameters for configuring a GRPCClient instance
@@ -75,20 +75,6 @@ type ClientConfig struct {
 	Timeout time.Duration
 	// AsyncConnect makes connection creation non blocking
 	AsyncConnect bool
-}
-
-// Clone clones this ClientConfig
-func (cc ClientConfig) Clone() ClientConfig {
-	shallowClone := cc
-	if shallowClone.SecOpts != nil {
-		secOptsClone := *cc.SecOpts
-		shallowClone.SecOpts = &secOptsClone
-	}
-	if shallowClone.KaOpts != nil {
-		kaOptsClone := *cc.KaOpts
-		shallowClone.KaOpts = &kaOptsClone
-	}
-	return shallowClone
 }
 
 // SecureOptions defines the security parameters (e.g. TLS) for a
@@ -114,8 +100,6 @@ type SecureOptions struct {
 	RequireClientCert bool
 	// CipherSuites is a list of supported cipher suites for TLS
 	CipherSuites []uint16
-	// TimeShift makes TLS handshakes time sampling shift to the past by a given duration
-	TimeShift time.Duration
 }
 
 // KeepaliveOptions is used to set the gRPC keepalive settings for both

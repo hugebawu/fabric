@@ -40,8 +40,7 @@ func TestPurgeIndexKeyCodingEncoding(t *testing.T) {
 				t.Run(testCase, func(t *testing.T) {
 					t.Logf("Running test case [%s]", testCase)
 					purgeIndexKey := createCompositeKeyForPurgeIndexByHeight(blkHt, txid, uuid)
-					txid1, uuid1, blkHt1, err := splitCompositeKeyOfPurgeIndexByHeight(purgeIndexKey)
-					assert.NoError(err)
+					txid1, uuid1, blkHt1 := splitCompositeKeyOfPurgeIndexByHeight(purgeIndexKey)
 					assert.Equal(txid, txid1)
 					assert.Equal(uuid, uuid1)
 					assert.Equal(blkHt, blkHt1)
@@ -63,8 +62,7 @@ func TestRWSetKeyCodingEncoding(t *testing.T) {
 				t.Run(testCase, func(t *testing.T) {
 					t.Logf("Running test case [%s]", testCase)
 					rwsetKey := createCompositeKeyForPvtRWSet(txid, uuid, blkHt)
-					uuid1, blkHt1, err := splitCompositeKeyOfPvtRWSet(rwsetKey)
-					assert.NoError(err)
+					uuid1, blkHt1 := splitCompositeKeyOfPvtRWSet(rwsetKey)
 					assert.Equal(uuid, uuid1)
 					assert.Equal(blkHt, blkHt1)
 				})

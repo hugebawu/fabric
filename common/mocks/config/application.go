@@ -47,7 +47,6 @@ type MockApplicationCapabilities struct {
 	KeyLevelEndorsementRv        bool
 	V1_3ValidationRv             bool
 	FabTokenRv                   bool
-	StorePvtDataOfInvalidTxRv    bool
 }
 
 func (mac *MockApplicationCapabilities) Supported() error {
@@ -92,8 +91,4 @@ func (mac *MockApplicationCapabilities) V1_3Validation() bool {
 
 func (mac *MockApplicationCapabilities) FabToken() bool {
 	return mac.FabTokenRv
-}
-
-func (mac *MockApplicationCapabilities) StorePvtDataOfInvalidTx() bool {
-	return mac.StorePvtDataOfInvalidTxRv
 }

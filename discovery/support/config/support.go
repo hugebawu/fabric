@@ -83,17 +83,12 @@ func (s *DiscoverySupport) Config(channel string) (*discovery.ConfigResult, erro
 	ordererGrp := ce.Config.ChannelGroup.Groups[channelconfig.OrdererGroupKey].Groups
 	appGrp := ce.Config.ChannelGroup.Groups[channelconfig.ApplicationGroupKey].Groups
 
-	var globalEndpoints []string
-	globalOrderers := ce.Config.ChannelGroup.Values[channelconfig.OrdererAddressesKey]
-	if globalOrderers != nil {
-		ordererAddressesConfig := &common.OrdererAddresses{}
-		if err := proto.Unmarshal(globalOrderers.Value, ordererAddressesConfig); err != nil {
-			return nil, errors.Wrap(err, "failed unmarshaling orderer addresses")
-		}
-		globalEndpoints = ordererAddressesConfig.Addresses
+	ordererAddresses := &common.OrdererAddresses{}
+	if err := proto.Unmarshal(ce.Config.ChannelGroup.Values[channelconfig.OrdererAddressesKey].Value, ordererAddresses); err != nil {
+		return nil, errors.Wrap(err, "failed unmarshaling orderer addresses")
 	}
 
-	ordererEndpoints, err := computeOrdererEndpoints(ordererGrp, globalEndpoints)
+	ordererEndpoints, err := computeOrdererEndpoints(ordererGrp, ordererAddresses)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed computing orderer addresses")
 	}
@@ -106,58 +101,8 @@ func (s *DiscoverySupport) Config(channel string) (*discovery.ConfigResult, erro
 
 }
 
-func computeOrdererEndpoints(ordererGrp map[string]*common.ConfigGroup, globalOrdererAddresses []string) (map[string]*discovery.Endpoints, error) {
-	endpointsByMSPID, err := perOrgEndpointsByMSPID(ordererGrp)
-	if err != nil {
-		return nil, err
-	}
-
-	var somePerOrgEndpoint bool
-	for _, perOrgEndpoints := range endpointsByMSPID {
-		if len(perOrgEndpoints) > 0 {
-			somePerOrgEndpoint = true
-			break
-		}
-	}
-
-	// Per org endpoints take precedence over global endpoints if applicable.
-	if somePerOrgEndpoint {
-		return computePerOrgEndpoints(endpointsByMSPID), nil
-	}
-
-	// Fallback to global endpoints if per org endpoints aren't configured.
-	return globalEndpoints(endpointsByMSPID, globalOrdererAddresses)
-}
-
-func computePerOrgEndpoints(endpointsByMSPID map[string][]string) map[string]*discovery.Endpoints {
+func computeOrdererEndpoints(ordererGrp map[string]*common.ConfigGroup, ordererAddresses *common.OrdererAddresses) (map[string]*discovery.Endpoints, error) {
 	res := make(map[string]*discovery.Endpoints)
-
-	for mspID, endpoints := range endpointsByMSPID {
-		res[mspID] = &discovery.Endpoints{}
-		for _, endpoint := range endpoints {
-			host, portStr, err := net.SplitHostPort(endpoint)
-			if err != nil {
-				logger.Warningf("Failed parsing endpoint %s for %s: %v", endpoint, mspID, err)
-				continue
-			}
-			port, err := strconv.ParseInt(portStr, 10, 32)
-			if err != nil {
-				logger.Warningf("%s for endpoint %s which belongs to %s is not a valid port number: %v", portStr, endpoint, mspID, err)
-				continue
-			}
-			res[mspID].Endpoint = append(res[mspID].Endpoint, &discovery.Endpoint{
-				Host: host,
-				Port: uint32(port),
-			})
-		}
-	}
-
-	return res
-}
-
-func perOrgEndpointsByMSPID(ordererGrp map[string]*common.ConfigGroup) (map[string][]string, error) {
-	res := make(map[string][]string)
-
 	for name, group := range ordererGrp {
 		mspConfig := &msp.MSPConfig{}
 		if err := proto.Unmarshal(group.Values[channelconfig.MSPKey].Value, mspConfig); err != nil {
@@ -170,35 +115,12 @@ func perOrgEndpointsByMSPID(ordererGrp map[string]*common.ConfigGroup) (map[stri
 			logger.Error("Orderer group", name, "is not a FABRIC MSP, but is of type", mspConfig.Type)
 			continue
 		}
-
 		fabricConfig := &msp.FabricMSPConfig{}
 		if err := proto.Unmarshal(mspConfig.Config, fabricConfig); err != nil {
 			return nil, errors.Wrap(err, "failed marshaling FabricMSPConfig")
 		}
-
-		// Initialize an empty MSP to address mapping.
-		res[fabricConfig.Name] = nil
-
-		// If the key has a corresponding value, it should unmarshal successfully.
-		if perOrgAddresses := group.Values["Endpoints"]; perOrgAddresses != nil {
-			ordererEndpoints := &common.OrdererAddresses{}
-			if err := proto.Unmarshal(perOrgAddresses.Value, ordererEndpoints); err != nil {
-				return nil, errors.Wrap(err, "failed unmarshaling orderer addresses")
-			}
-			// Override the mapping because this orderer org config contains org-specific endpoints.
-			res[fabricConfig.Name] = ordererEndpoints.Addresses
-		}
-	}
-
-	return res, nil
-}
-
-func globalEndpoints(endpointsByMSPID map[string][]string, ordererAddresses []string) (map[string]*discovery.Endpoints, error) {
-	res := make(map[string]*discovery.Endpoints)
-
-	for mspID := range endpointsByMSPID {
-		res[mspID] = &discovery.Endpoints{}
-		for _, endpoint := range ordererAddresses {
+		res[fabricConfig.Name] = &discovery.Endpoints{}
+		for _, endpoint := range ordererAddresses.Addresses {
 			host, portStr, err := net.SplitHostPort(endpoint)
 			if err != nil {
 				return nil, errors.Errorf("failed parsing orderer endpoint %s", endpoint)
@@ -207,7 +129,7 @@ func globalEndpoints(endpointsByMSPID map[string][]string, ordererAddresses []st
 			if err != nil {
 				return nil, errors.Errorf("%s is not a valid port number", portStr)
 			}
-			res[mspID].Endpoint = append(res[mspID].Endpoint, &discovery.Endpoint{
+			res[fabricConfig.Name].Endpoint = append(res[fabricConfig.Name].Endpoint, &discovery.Endpoint{
 				Host: host,
 				Port: uint32(port),
 			})
@@ -263,6 +185,9 @@ func ValidateConfigEnvelope(ce *common.ConfigEnvelope) error {
 	}
 	if ce.Config.ChannelGroup.Values == nil {
 		return fmt.Errorf("field Config.ChannelGroup.Values is nil")
+	}
+	if _, exists := ce.Config.ChannelGroup.Values[channelconfig.OrdererAddressesKey]; !exists {
+		return fmt.Errorf("field Config.ChannelGroup.Values is empty")
 	}
 	return nil
 }

@@ -8,7 +8,6 @@ package cscc
 
 import (
 	"fmt"
-	"net"
 	"os"
 	"testing"
 	"time"
@@ -37,7 +36,7 @@ import (
 	"github.com/hyperledger/fabric/core/common/ccprovider"
 	"github.com/hyperledger/fabric/core/container"
 	"github.com/hyperledger/fabric/core/container/inproccontroller"
-	deliverclient "github.com/hyperledger/fabric/core/deliverservice"
+	"github.com/hyperledger/fabric/core/deliverservice"
 	"github.com/hyperledger/fabric/core/deliverservice/blocksprovider"
 	"github.com/hyperledger/fabric/core/ledger/ledgermgmt"
 	ccprovidermocks "github.com/hyperledger/fabric/core/mocks/ccprovider"
@@ -48,7 +47,7 @@ import (
 	"github.com/hyperledger/fabric/gossip/api"
 	"github.com/hyperledger/fabric/gossip/service"
 	"github.com/hyperledger/fabric/msp/mgmt"
-	msptesttools "github.com/hyperledger/fabric/msp/mgmt/testtools"
+	"github.com/hyperledger/fabric/msp/mgmt/testtools"
 	peergossip "github.com/hyperledger/fabric/peer/gossip"
 	"github.com/hyperledger/fabric/peer/gossip/mocks"
 	cb "github.com/hyperledger/fabric/protos/common"
@@ -57,8 +56,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc"
 )
 
 //go:generate counterfeiter -o mock/config_manager.go --fake-name ConfigManager . configManager
@@ -79,7 +76,7 @@ type configtxValidator interface {
 type mockDeliveryClient struct {
 }
 
-func (ds *mockDeliveryClient) UpdateEndpoints(chainID string, _ deliverclient.ConnectionCriteria) error {
+func (ds *mockDeliveryClient) UpdateEndpoints(chainID string, endpoints []string) error {
 	return nil
 }
 
@@ -103,7 +100,7 @@ func (*mockDeliveryClient) Stop() {
 type mockDeliveryClientFactory struct {
 }
 
-func (*mockDeliveryClientFactory) Service(g service.GossipService, _ service.OrdererAddressConfig, mcs api.MessageCryptoService) (deliverclient.DeliverService, error) {
+func (*mockDeliveryClientFactory) Service(g service.GossipService, endpoints []string, mcs api.MessageCryptoService) (deliverclient.DeliverService, error) {
 	return &mockDeliveryClient{}, nil
 }
 
@@ -215,7 +212,7 @@ func TestConfigerInvokeJoinChainCorrectParams(t *testing.T) {
 	e := New(ccp, mp, mockAclProvider)
 	stub := shim.NewMockStub("PeerConfiger", e)
 
-	peerEndpoint := "127.0.0.1:13611"
+	peerEndpoint := "localhost:13611"
 
 	ca, _ := tlsgen.NewCA()
 	certGenerator := accesscontrol.NewAuthenticator(ca)
@@ -266,24 +263,11 @@ func TestConfigerInvokeJoinChainCorrectParams(t *testing.T) {
 		&policymocks.MockMSPPrincipalGetter{Principal: []byte("Alice")},
 	)
 
-	grpcServer := grpc.NewServer()
-	socket, err := net.Listen("tcp", peerEndpoint)
-	require.NoError(t, err)
-
 	identity, _ := mgmt.GetLocalSigningIdentityOrPanic().Serialize()
 	messageCryptoService := peergossip.NewMCS(&mocks.ChannelPolicyManagerGetter{}, localmsp.NewSigner(), mgmt.NewDeserializersManager())
 	secAdv := peergossip.NewSecurityAdvisor(mgmt.NewDeserializersManager())
-	var defaultSecureDialOpts = func() []grpc.DialOption {
-		var dialOpts []grpc.DialOption
-		dialOpts = append(dialOpts, grpc.WithInsecure())
-		return dialOpts
-	}
-	err = service.InitGossipServiceCustomDeliveryFactory(identity, &disabled.Provider{}, peerEndpoint, grpcServer, nil,
-		&mockDeliveryClientFactory{}, messageCryptoService, secAdv, defaultSecureDialOpts)
+	err := service.InitGossipServiceCustomDeliveryFactory(identity, peerEndpoint, nil, nil, &mockDeliveryClientFactory{}, messageCryptoService, secAdv, nil)
 	assert.NoError(t, err)
-
-	go grpcServer.Serve(socket)
-	defer grpcServer.Stop()
 
 	// Successful path for JoinChain
 	blockBytes := mockConfigBlock()
@@ -524,7 +508,8 @@ func TestPeerConfiger_SubmittingOrdererGenesis(t *testing.T) {
 	conf.Application = nil
 	cg, err := encoder.NewChannelGroup(conf)
 	assert.NoError(t, err)
-	block := genesis.NewFactoryImpl(cg).Block("mytestchainid")
+	block, err := genesis.NewFactoryImpl(cg).Block("mytestchainid")
+	assert.NoError(t, err)
 	blockBytes := utils.MarshalOrPanic(block)
 
 	// Failed path: wrong parameter type

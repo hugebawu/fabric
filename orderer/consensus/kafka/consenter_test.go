@@ -13,9 +13,8 @@ import (
 	"time"
 
 	"github.com/hyperledger/fabric/common/flogging"
-	"github.com/hyperledger/fabric/common/metrics/disabled"
 	mockconfig "github.com/hyperledger/fabric/common/mocks/config"
-	"github.com/hyperledger/fabric/orderer/common/localconfig"
+	localconfig "github.com/hyperledger/fabric/orderer/common/localconfig"
 	"github.com/hyperledger/fabric/orderer/consensus"
 	"github.com/hyperledger/fabric/orderer/consensus/kafka/mock"
 	mockmultichannel "github.com/hyperledger/fabric/orderer/mocks/common/multichannel"
@@ -72,12 +71,12 @@ func init() {
 }
 
 func TestNew(t *testing.T) {
-	c, _ := New(mockLocalConfig.Kafka, &mock.MetricsProvider{}, &mock.HealthChecker{}, nil, func(string) {})
+	c, _ := New(mockLocalConfig.Kafka, &mock.MetricsProvider{})
 	_ = consensus.Consenter(c)
 }
 
 func TestHandleChain(t *testing.T) {
-	consenter, _ := New(mockLocalConfig.Kafka, &disabled.Provider{}, &mock.HealthChecker{}, nil, func(string) {})
+	consenter, _ := New(mockLocalConfig.Kafka, &mock.MetricsProvider{})
 
 	oldestOffset := int64(0)
 	newestOffset := int64(5)
@@ -148,7 +147,6 @@ func newMockConsenter(brokerConfig *sarama.Config, tlsConfig localconfig.TLS, re
 		tlsConfigVal:    tlsConfig,
 		retryOptionsVal: retryOptions,
 		kafkaVersionVal: kafkaVersion,
-		metrics:         NewMetrics(&disabled.Provider{}, nil),
 	}
 }
 

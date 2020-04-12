@@ -102,7 +102,7 @@ func (txmgr *LockBasedTxMgr) NewTxSimulator(txid string) (ledger.TxSimulator, er
 
 // ValidateAndPrepare implements method in interface `txmgmt.TxMgr`
 func (txmgr *LockBasedTxMgr) ValidateAndPrepare(blockAndPvtdata *ledger.BlockAndPvtData, doMVCCValidation bool) (
-	[]*txmgr.TxStatInfo, []byte, error,
+	[]*txmgr.TxStatInfo, error,
 ) {
 	// Among ValidateAndPrepare(), PrepareExpiringKeys(), and
 	// RemoveStaleAndCommitPvtDataOfOldBlocks(), we can allow only one
@@ -125,17 +125,14 @@ func (txmgr *LockBasedTxMgr) ValidateAndPrepare(blockAndPvtdata *ledger.BlockAnd
 	batch, txstatsInfo, err := txmgr.validator.ValidateAndPrepareBatch(blockAndPvtdata, doMVCCValidation)
 	if err != nil {
 		txmgr.reset()
-		return nil, nil, err
+		return nil, err
 	}
 	txmgr.current = &current{block: block, batch: batch}
 	if err := txmgr.invokeNamespaceListeners(); err != nil {
 		txmgr.reset()
-		return nil, nil, err
+		return nil, err
 	}
-
-	updateBytesBuilder := &privacyenabledstate.UpdatesBytesBuilder{}
-	updateBytes, err := updateBytesBuilder.DeterministicBytesForPubAndHashUpdates(batch)
-	return txstatsInfo, updateBytes, err
+	return txstatsInfo, nil
 }
 
 // RemoveStaleAndCommitPvtDataOfOldBlocks implements method in interface `txmgmt.TxMgr`
@@ -147,8 +144,17 @@ func (txmgr *LockBasedTxMgr) ValidateAndPrepare(blockAndPvtdata *ledger.BlockAnd
 // (5) update the BTL bookkeeping managed by the purge manager and update expiring keys.
 // (6) commit the non-stale pvt data to the stateDB
 // This function assumes that the passed input contains only transactions that had been
-// marked "Valid". In the current design, kvledger (a single consumer of this function),
-// filters out the data of "invalid" transactions and supplies the data for "valid" transactions only.
+// marked "Valid". In the current design, this assumption holds true as we store
+// missing data info about only valid transactions. Further, gossip supplies only the
+// missing pvtData of valid transactions. If these two assumptions are broken due to some bug,
+// we are still safe from data consistency point of view as we match the version and the
+// value hashes stored in the stateDB before committing the value. However, if pvtData of
+// a tuple <ns, Coll, key> is passed for two (or more) transactions with one as valid and
+// another as invalid transaction, we might miss to store a missing data forever if the
+// version# of invalid tx is greater than the valid tx (as per our logic employed in
+// constructUniquePvtData(). Other than a bug, there is another scenario in which this
+// function might receive pvtData of both valid and invalid tx. Such a scenario is explained
+// in FAB-12924 and is related to state fork and rebuilding ledger state.
 func (txmgr *LockBasedTxMgr) RemoveStaleAndCommitPvtDataOfOldBlocks(blocksPvtData map[uint64][]*ledger.TxPvtData) error {
 	// (0) Among ValidateAndPrepare(), PrepareExpiringKeys(), and
 	// RemoveStaleAndCommitPvtDataOfOldBlocks(), we can allow only one
@@ -333,8 +339,8 @@ func checkIfPvtWriteIsStale(hashedKey *privacyenabledstate.HashedCompositeKey,
 	// for a deleted hashedKey, we would get a nil committed version. Note that
 	// the hashedKey was deleted because either it got expired or was deleted by
 	// the chaincode itself.
-	if committedVersion == nil {
-		return !kvWrite.IsDelete, nil
+	if committedVersion == nil && kvWrite.IsDelete {
+		return false, nil
 	}
 
 	/*
@@ -516,16 +522,11 @@ func (txmgr *LockBasedTxMgr) ShouldRecover(lastAvailableBlock uint64) (bool, uin
 	return savepoint.BlockNum != lastAvailableBlock, savepoint.BlockNum + 1, nil
 }
 
-// Name returns the name of the database that manages all active states.
-func (txmgr *LockBasedTxMgr) Name() string {
-	return "state"
-}
-
 // CommitLostBlock implements method in interface kvledger.Recoverer
 func (txmgr *LockBasedTxMgr) CommitLostBlock(blockAndPvtdata *ledger.BlockAndPvtData) error {
 	block := blockAndPvtdata.Block
 	logger.Debugf("Constructing updateSet for the block %d", block.Header.Number)
-	if _, _, err := txmgr.ValidateAndPrepare(blockAndPvtdata, false); err != nil {
+	if _, err := txmgr.ValidateAndPrepare(blockAndPvtdata, false); err != nil {
 		return err
 	}
 

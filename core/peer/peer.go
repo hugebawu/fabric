@@ -49,7 +49,7 @@ import (
 
 var peerLogger = flogging.MustGetLogger("peer")
 
-var peerServers []*comm.GRPCServer
+var peerServer *comm.GRPCServer
 
 var configTxProcessor = newConfigTxProcessor()
 var tokenTxProcessor = &transaction.Processor{
@@ -63,44 +63,10 @@ var ConfigTxProcessors = customtx.Processors{
 // singleton instance to manage credentials for the peer across channel config changes
 var credSupport = comm.GetCredentialSupport()
 
-//go:generate mockery -dir . -name OrdererOrg -case underscore -output mocks/
-
-// OrdererOrg stores the per org orderer config.
-type OrdererOrg interface {
-	channelconfig.Org
-
-	// Endpoints returns the endpoints of orderer nodes.
-	Endpoints() []string
-}
-
-type gossipChannelConfig struct {
-	ac channelconfig.Application
-	oc channelconfig.Orderer
+type gossipSupport struct {
+	channelconfig.Application
 	configtx.Validator
 	channelconfig.Channel
-}
-
-func (gcp *gossipChannelConfig) ApplicationOrgs() service.ApplicationOrgs {
-	return gcp.ac.Organizations()
-}
-
-func (gcp *gossipChannelConfig) OrdererOrgs() []string {
-	var res []string
-	for _, org := range gcp.oc.Organizations() {
-		res = append(res, org.MSPID())
-	}
-	return res
-}
-
-func (gcp *gossipChannelConfig) OrdererAddressesByOrgs() map[string][]string {
-	res := make(map[string][]string)
-	for _, ordererOrg := range gcp.oc.Organizations() {
-		if len(ordererOrg.Endpoints()) == 0 {
-			continue
-		}
-		res[ordererOrg.MSPID()] = ordererOrg.Endpoints()
-	}
-	return res
 }
 
 type chainSupport struct {
@@ -203,8 +169,6 @@ func (cs *chainSupport) Reader() blockledger.Reader {
 // the peer does not have any error conditions that lead to
 // this function signaling that an error has occurred.
 func (cs *chainSupport) Errored() <-chan struct{} {
-	// If this is ever updated to return a real channel, the error message
-	// in deliver.go around this channel closing should be updated.
 	return nil
 }
 
@@ -266,18 +230,22 @@ func Initialize(init func(string), ccp ccprovider.ChaincodeProvider, sccp sysccp
 	for _, cid := range ledgerIds {
 		peerLogger.Infof("Loading chain %s", cid)
 		if ledger, err = ledgermgmt.OpenLedger(cid); err != nil {
+<<<<<<< HEAD
 			peerLogger.Errorf("Failed to load ledger %s(%+v)", cid, err)
+=======
+			peerLogger.Warningf("Failed to load ledger %s(%s)", cid, err)
+>>>>>>> tag-v1.4.0
 			peerLogger.Debugf("Error while loading ledger %s with message %s. We continue to the next ledger rather than abort.", cid, err)
 			continue
 		}
 		if cb, err = getCurrConfigBlockFromLedger(ledger); err != nil {
-			peerLogger.Errorf("Failed to find config block on ledger %s(%s)", cid, err)
+			peerLogger.Warningf("Failed to find config block on ledger %s(%s)", cid, err)
 			peerLogger.Debugf("Error while looking for config block on ledger %s with message %s. We continue to the next ledger rather than abort.", cid, err)
 			continue
 		}
 		// Create a chain if we get a valid ledger with config block
 		if err = createChain(cid, ledger, cb, ccp, sccp, pm); err != nil {
-			peerLogger.Errorf("Failed to load chain %s(%s)", cid, err)
+			peerLogger.Warningf("Failed to load chain %s(%s)", cid, err)
 			peerLogger.Debugf("Error reloading chain %s with message %s. We continue to the next chain rather than abort.", cid, err)
 			continue
 		}
@@ -325,15 +293,7 @@ func getCurrConfigBlockFromLedger(ledger ledger.PeerLedger) (*common.Block, erro
 }
 
 // createChain creates a new chain object and insert it into the chains
-func createChain(
-	cid string,
-	ledger ledger.PeerLedger,
-	cb *common.Block,
-	ccp ccprovider.ChaincodeProvider,
-	sccp sysccprovider.SystemChaincodeProvider,
-	pm txvalidator.PluginMapper,
-) error {
-
+func createChain(cid string, ledger ledger.PeerLedger, cb *common.Block, ccp ccprovider.ChaincodeProvider, sccp sysccprovider.SystemChaincodeProvider, pm txvalidator.PluginMapper) error {
 	chanConf, err := retrievePersistedChannelConfig(ledger)
 	if err != nil {
 		return err
@@ -372,18 +332,10 @@ func createChain(
 			// TODO, handle a missing ApplicationConfig more gracefully
 			ac = nil
 		}
-
-		oc, ok := bundle.OrdererConfig()
-		if !ok {
-			// TODO: handle a missing OrdererConfig more gracefully
-			oc = nil
-		}
-
-		gossipEventer.ProcessConfigUpdate(&gossipChannelConfig{
-			Validator: bundle.ConfigtxValidator(),
-			ac:        ac,
-			oc:        oc,
-			Channel:   bundle.ChannelConfig(),
+		gossipEventer.ProcessConfigUpdate(&gossipSupport{
+			Validator:   bundle.ConfigtxValidator(),
+			Application: ac,
+			Channel:     bundle.ChannelConfig(),
 		})
 		service.GetGossipService().SuspectPeers(func(identity api.PeerIdentityType) bool {
 			// TODO: this is a place-holder that would somehow make the MSP layer suspect
@@ -422,15 +374,12 @@ func createChain(
 		cs.Resources = bundle
 	}
 
-	cp := &capabilityProvider{}
-
 	cs.bundleSource = channelconfig.NewBundleSource(
 		bundle,
 		gossipCallbackWrapper,
 		trustedRootsCallbackWrapper,
 		mspCallback,
 		peerSingletonCallback,
-		cp.updateChannelConfig,
 	)
 
 	vcs := struct {
@@ -446,29 +395,9 @@ func createChain(
 		return SetCurrConfigBlock(block, chainID)
 	})
 
-	oc, ok := bundle.OrdererConfig()
-	if !ok {
-		return errors.New("no orderer config in bundle")
-	}
-
-	ordererAddressesByOrg := make(map[string][]string)
-	var ordererOrganizations []string
-	for _, ordererOrg := range oc.Organizations() {
-		ordererOrganizations = append(ordererOrganizations, ordererOrg.MSPID())
-		if len(ordererOrg.Endpoints()) == 0 {
-			continue
-		}
-		ordererAddressesByOrg[ordererOrg.MSPID()] = ordererOrg.Endpoints()
-	}
-
 	ordererAddresses := bundle.ChannelConfig().OrdererAddresses()
-	if len(ordererAddresses) == 0 && len(ordererAddressesByOrg) == 0 {
+	if len(ordererAddresses) == 0 {
 		return errors.New("no ordering service endpoint provided in configuration block")
-	}
-
-	ordererAddressOverrides, err := GetOrdererAddressOverrides()
-	if err != nil {
-		return errors.Errorf("failed to get override addresses: %s", err)
 	}
 
 	// TODO: does someone need to call Close() on the transientStoreFactory at shutdown of the peer?
@@ -476,25 +405,17 @@ func createChain(
 	if err != nil {
 		return errors.Wrapf(err, "[channel %s] failed opening transient store", bundle.ConfigtxValidator().ChainID())
 	}
-
 	csStoreSupport := &CollectionSupport{
 		PeerLedger: ledger,
 	}
 	simpleCollectionStore := privdata.NewSimpleCollectionStore(csStoreSupport)
 
-	oac := service.OrdererAddressConfig{
-		Addresses:        ordererAddresses,
-		AddressesByOrg:   ordererAddressesByOrg,
-		Organizations:    ordererOrganizations,
-		AddressOverrides: ordererAddressOverrides,
-	}
-	service.GetGossipService().InitializeChannel(bundle.ConfigtxValidator().ChainID(), oac, service.Support{
+	service.GetGossipService().InitializeChannel(bundle.ConfigtxValidator().ChainID(), ordererAddresses, service.Support{
 		Validator:            validator,
 		Committer:            c,
 		Store:                store,
 		Cs:                   simpleCollectionStore,
 		IdDeserializeFactory: csStoreSupport,
-		CapabilityProvider:   cp,
 	})
 
 	chains.Lock()
@@ -604,8 +525,9 @@ func updateTrustedRoots(cm channelconfig.Resources) {
 			trustedRoots = append(trustedRoots, serverConfig.SecOpts.ServerRootCAs...)
 		}
 
-		for _, server := range peerServers {
-			// now update the client roots for the peerServers
+		server := peerServer
+		// now update the client roots for the peerServer
+		if server != nil {
 			err := server.SetClientRootCAs(trustedRoots)
 			if err != nil {
 				msg := "Failed to update trusted roots for peer from latest config " +
@@ -623,6 +545,8 @@ func buildTrustedRootsForChain(cm channelconfig.Resources) {
 	credSupport.Lock()
 	defer credSupport.Unlock()
 
+	appRootCAs := [][]byte{}
+	ordererRootCAs := [][]byte{}
 	appOrgMSPs := make(map[string]struct{})
 	ordOrgMSPs := make(map[string]struct{})
 
@@ -640,17 +564,14 @@ func buildTrustedRootsForChain(cm channelconfig.Resources) {
 		}
 	}
 
-	var appRootCAs comm.CertificateBundle
 	cid := cm.ConfigtxValidator().ChainID()
 	peerLogger.Debugf("updating root CAs for channel [%s]", cid)
 	msps, err := cm.MSPManager().GetMSPs()
 	if err != nil {
 		peerLogger.Errorf("Error getting root CAs for channel %s (%s)", cid, err)
 	}
-	ordererRootCAsPerOrg := make(map[string]comm.CertificateBundle)
 	if err == nil {
 		for k, v := range msps {
-			var ordererRootCAs comm.CertificateBundle
 			// check to see if this is a FABRIC MSP
 			if v.GetType() == msp.FABRIC {
 				for _, root := range v.GetTLSRootCerts() {
@@ -677,11 +598,10 @@ func buildTrustedRootsForChain(cm channelconfig.Resources) {
 						ordererRootCAs = append(ordererRootCAs, intermediate)
 					}
 				}
-				ordererRootCAsPerOrg[k] = ordererRootCAs
 			}
 		}
 		credSupport.AppRootCAsByChain[cid] = appRootCAs
-		credSupport.OrdererRootCAsByChainAndOrg[cid] = ordererRootCAsPerOrg
+		credSupport.OrdererRootCAsByChain[cid] = ordererRootCAs
 	}
 }
 
@@ -778,12 +698,12 @@ func (c *channelPolicyManagerGetter) Manager(channelID string) (policies.Manager
 // NewPeerServer creates an instance of comm.GRPCServer
 // This server is used for peer communications
 func NewPeerServer(listenAddress string, serverConfig comm.ServerConfig) (*comm.GRPCServer, error) {
-	peerServer, err := comm.NewGRPCServer(listenAddress, serverConfig)
+	var err error
+	peerServer, err = comm.NewGRPCServer(listenAddress, serverConfig)
 	if err != nil {
 		peerLogger.Errorf("Failed to create peer server (%s)", err)
 		return nil, err
 	}
-	peerServers = append(peerServers, peerServer)
 	return peerServer, nil
 }
 
@@ -859,25 +779,4 @@ func (*configSupport) GetChannelConfig(channel string) cc.Config {
 		return nil
 	}
 	return chain.cs.bundleSource.ConfigtxValidator()
-}
-
-type capabilityProvider struct {
-	lock   sync.Mutex
-	bundle *channelconfig.Bundle
-}
-
-func (cp *capabilityProvider) Capabilities() channelconfig.ApplicationCapabilities {
-	cp.lock.Lock()
-	defer cp.lock.Unlock()
-	ac, ok := cp.bundle.ApplicationConfig()
-	if !ok {
-		return nil
-	}
-	return ac.Capabilities()
-}
-
-func (cp *capabilityProvider) updateChannelConfig(bundle *channelconfig.Bundle) {
-	cp.lock.Lock()
-	defer cp.lock.Unlock()
-	cp.bundle = bundle
 }

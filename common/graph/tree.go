@@ -103,13 +103,8 @@ type Tree struct {
 
 // Permute returns Trees that their vertices and edges all exist in the original tree.
 // The permutations are calculated according to the thresholds of all vertices.
-// The combinationUpperBound is an upper bound of possible combinations of direct descendants
-// of a vertex. If the vertex has a threshold and descendants that result a number of combinations
-// that exceeds the given combinationUpperBound, the descendants are pruned until the number of
-// combinations is lower than the combinationUpperBound.
-// This is done in order to cap the memory usage of the computed result.
-func (t *Tree) Permute(combinationUpperBound int) []*Tree {
-	return newTreePermutation(t.Root, combinationUpperBound).permute()
+func (t *Tree) Permute() []*Tree {
+	return newTreePermutation(t.Root).permute()
 }
 
 // BFS returns an iterator that iterates the vertices

@@ -14,22 +14,15 @@ import (
 	"github.com/hyperledger/fabric/protos/ledger/rwset"
 )
 
-func v11Format(datakeyBytes []byte) (bool, error) {
-	_, n, err := version.NewHeightFromBytes(datakeyBytes[1:])
-	if err != nil {
-		return false, err
-	}
+func v11Format(datakeyBytes []byte) bool {
+	_, n := version.NewHeightFromBytes(datakeyBytes[1:])
 	remainingBytes := datakeyBytes[n+1:]
-	return len(remainingBytes) == 0, err
+	return len(remainingBytes) == 0
 }
 
-// v11DecodePK returns block number, tx number, and error.
-func v11DecodePK(key blkTranNumKey) (uint64, uint64, error) {
-	height, _, err := version.NewHeightFromBytes(key[1:])
-	if err != nil {
-		return 0, 0, err
-	}
-	return height.BlockNum, height.TxNum, nil
+func v11DecodePK(key blkTranNumKey) (blockNum uint64, tranNum uint64) {
+	height, _ := version.NewHeightFromBytes(key[1:])
+	return height.BlockNum, height.TxNum
 }
 
 func v11DecodePvtRwSet(encodedBytes []byte) (*rwset.TxPvtReadWriteSet, error) {
@@ -55,11 +48,9 @@ func v11RetrievePvtdata(itr *leveldbhelper.Iterator, filter ledger.PvtNsCollFilt
 }
 
 func v11DecodeKV(k, v []byte, filter ledger.PvtNsCollFilter) (*ledger.TxPvtData, error) {
-	bNum, tNum, err := v11DecodePK(k)
-	if err != nil {
-		return nil, err
-	}
+	bNum, tNum := v11DecodePK(k)
 	var pvtWSet *rwset.TxPvtReadWriteSet
+	var err error
 	if pvtWSet, err = v11DecodePvtRwSet(v); err != nil {
 		return nil, err
 	}

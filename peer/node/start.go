@@ -7,24 +7,20 @@ SPDX-License-Identifier: Apache-2.0
 package node
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/cauthdsl"
 	ccdef "github.com/hyperledger/fabric/common/chaincode"
-	"github.com/hyperledger/fabric/common/crypto"
 	"github.com/hyperledger/fabric/common/crypto/tlsgen"
 	"github.com/hyperledger/fabric/common/deliver"
 	"github.com/hyperledger/fabric/common/flogging"
-	floggingmetrics "github.com/hyperledger/fabric/common/flogging/metrics"
 	"github.com/hyperledger/fabric/common/grpclogging"
 	"github.com/hyperledger/fabric/common/grpcmetrics"
 	"github.com/hyperledger/fabric/common/localmsp"
@@ -35,7 +31,7 @@ import (
 	"github.com/hyperledger/fabric/core/aclmgmt"
 	"github.com/hyperledger/fabric/core/aclmgmt/resources"
 	"github.com/hyperledger/fabric/core/admin"
-	cc "github.com/hyperledger/fabric/core/cclifecycle"
+	"github.com/hyperledger/fabric/core/cclifecycle"
 	"github.com/hyperledger/fabric/core/chaincode"
 	"github.com/hyperledger/fabric/core/chaincode/accesscontrol"
 	"github.com/hyperledger/fabric/core/chaincode/lifecycle"
@@ -57,10 +53,8 @@ import (
 	endorsement2 "github.com/hyperledger/fabric/core/handlers/endorsement/api"
 	endorsement3 "github.com/hyperledger/fabric/core/handlers/endorsement/api/identities"
 	"github.com/hyperledger/fabric/core/handlers/library"
-	validation "github.com/hyperledger/fabric/core/handlers/validation/api"
-	"github.com/hyperledger/fabric/core/ledger"
+	"github.com/hyperledger/fabric/core/handlers/validation/api"
 	"github.com/hyperledger/fabric/core/ledger/cceventmgmt"
-	"github.com/hyperledger/fabric/core/ledger/kvledger"
 	"github.com/hyperledger/fabric/core/ledger/ledgermgmt"
 	"github.com/hyperledger/fabric/core/operations"
 	"github.com/hyperledger/fabric/core/peer"
@@ -99,7 +93,6 @@ const (
 	chaincodeAddrKey       = "peer.chaincodeAddress"
 	chaincodeListenAddrKey = "peer.chaincodeListenAddress"
 	defaultChaincodePort   = 7052
-	grpcMaxConcurrency     = 2500
 )
 
 var chaincodeDevMode bool
@@ -139,8 +132,6 @@ func serve(args []string) error {
 		panic("Unsupported msp type " + msp.ProviderTypeToString(mspType))
 	}
 
-	mspID := viper.GetString("peer.localMspId")
-
 	// Trace RPCs with the golang.org/x/net/trace package. This was moved out of
 	// the deliver service connection factory as it has process wide implications
 	// and was racy with respect to initialization of gRPC clients and servers.
@@ -175,10 +166,8 @@ func serve(args []string) error {
 	defer opsSystem.Stop()
 
 	metricsProvider := opsSystem.Provider
-	logObserver := floggingmetrics.NewObserver(metricsProvider)
-	flogging.Global.SetObserver(logObserver)
 
-	membershipInfoProvider := privdata.NewMembershipInfoProvider(mspID, createSelfSignedData(), identityDeserializerFactory)
+	membershipInfoProvider := privdata.NewMembershipInfoProvider(createSelfSignedData(), identityDeserializerFactory)
 	//initialize resource management exit
 	ledgermgmt.Initialize(
 		&ledgermgmt.Initializer{
@@ -187,7 +176,6 @@ func serve(args []string) error {
 			DeployedChaincodeInfoProvider: deployedCCInfoProvider,
 			MembershipInfoProvider:        membershipInfoProvider,
 			MetricsProvider:               metricsProvider,
-			HealthCheckRegistry:           opsSystem,
 		},
 	)
 
@@ -221,20 +209,17 @@ func serve(args []string) error {
 		logger.Fatalf("Error loading secure config for peer (%s)", err)
 	}
 
-	throttle := comm.NewThrottle(grpcMaxConcurrency)
 	serverConfig.Logger = flogging.MustGetLogger("core.comm").With("server", "PeerServer")
-	serverConfig.ServerStatsHandler = comm.NewServerStatsHandler(metricsProvider)
+	serverConfig.MetricsProvider = metricsProvider
 	serverConfig.UnaryInterceptors = append(
 		serverConfig.UnaryInterceptors,
 		grpcmetrics.UnaryServerInterceptor(grpcmetrics.NewUnaryMetrics(metricsProvider)),
 		grpclogging.UnaryServerInterceptor(flogging.MustGetLogger("comm.grpc.server").Zap()),
-		throttle.UnaryServerIntercptor,
 	)
 	serverConfig.StreamInterceptors = append(
 		serverConfig.StreamInterceptors,
 		grpcmetrics.StreamServerInterceptor(grpcmetrics.NewStreamMetrics(metricsProvider)),
 		grpclogging.StreamServerInterceptor(flogging.MustGetLogger("comm.grpc.server").Zap()),
-		throttle.StreamServerInterceptor,
 	)
 
 	peerServer, err := peer.NewPeerServer(listenAddr, serverConfig)
@@ -246,16 +231,12 @@ func serve(args []string) error {
 		logger.Info("Starting peer with TLS enabled")
 		// set up credential support
 		cs := comm.GetCredentialSupport()
-		roots, err := peer.GetServerRootCAs()
-		if err != nil {
-			logger.Fatalf("Failed to set TLS server root CAs: %s", err)
-		}
-		cs.ServerRootCAs = roots
+		cs.ServerRootCAs = serverConfig.SecOpts.ServerRootCAs
 
 		// set the cert to use if client auth is requested by remote endpoints
 		clientCert, err := peer.GetClientCertificate()
 		if err != nil {
-			logger.Fatalf("Failed to set TLS client certificate: %s", err)
+			logger.Fatalf("Failed to set TLS client certificate (%s)", err)
 		}
 		comm.GetCredentialSupport().SetClientCertificate(clientCert)
 	}
@@ -276,7 +257,7 @@ func serve(args []string) error {
 	logger.Debugf("Running peer")
 
 	// Start the Admin server
-	startAdminServer(listenAddr, peerServer.Server(), serverConfig)
+	startAdminServer(listenAddr, peerServer.Server(), metricsProvider)
 
 	privDataDist := func(channel string, txID string, privateData *transientstore.TxPvtReadWriteSetWithConfigInfo, blkHt uint64) error {
 		return service.GetGossipService().DistributePrivateData(channel, txID, privateData, blkHt)
@@ -315,22 +296,15 @@ func serve(args []string) error {
 		SigningIdentityFetcher:  signingIdentityFetcher,
 	})
 	endorserSupport.PluginEndorser = pluginEndorser
-	serverEndorser := endorser.NewEndorserServer(privDataDist, endorserSupport, pr, metricsProvider)
-
-	expirationLogger := flogging.MustGetLogger("certmonitor")
-	crypto.TrackExpiration(
-		serverConfig.SecOpts.UseTLS,
-		serverConfig.SecOpts.Certificate,
-		comm.GetCredentialSupport().GetClientCertificate().Certificate,
-		serializedIdentity,
-		expirationLogger.Warnf, // This can be used to piggyback a metric event in the future
-		time.Now(),
-		time.AfterFunc)
+	serverEndorser := endorser.NewEndorserServer(privDataDist, endorserSupport, pr)
+	auth := authHandler.ChainFilters(serverEndorser, authFilters...)
+	// Register the Endorser server
+	pb.RegisterEndorserServer(peerServer.Server(), auth)
 
 	policyMgr := peer.NewChannelPolicyManagerGetter()
 
 	// Initialize gossip component
-	err = initGossipService(policyMgr, metricsProvider, peerServer, serializedIdentity, peerEndpoint.Address)
+	err = initGossipService(policyMgr, peerServer, serializedIdentity, peerEndpoint.Address)
 	if err != nil {
 		return err
 	}
@@ -392,6 +366,16 @@ func serve(args []string) error {
 	// genesis block if needed.
 	serve := make(chan error)
 
+	go func() {
+		var grpcErr error
+		if grpcErr = peerServer.Start(); grpcErr != nil {
+			grpcErr = fmt.Errorf("grpc server exited with error: %s", grpcErr)
+		} else {
+			logger.Info("peer server exited")
+		}
+		serve <- grpcErr
+	}()
+
 	// Start profiling http endpoint if enabled
 	if profileEnabled {
 		go func() {
@@ -408,36 +392,6 @@ func serve(args []string) error {
 	}))
 
 	logger.Infof("Started peer with ID=[%s], network ID=[%s], address=[%s]", peerEndpoint.Id, networkID, peerEndpoint.Address)
-
-	// check to see if the peer ledgers have been reset
-	preResetHeights, err := kvledger.LoadPreResetHeight()
-	if err != nil {
-		return fmt.Errorf("error loading prereset height: %s", err)
-	}
-	for cid, height := range preResetHeights {
-		logger.Infof("Ledger rebuild: channel [%s]: preresetHeight: [%d]", cid, height)
-	}
-	if len(preResetHeights) > 0 {
-		logger.Info("Ledger rebuild: Entering loop to check if current ledger heights surpass prereset ledger heights. Endorsement request processing will be disabled.")
-		resetFilter := &reset{
-			reject: true,
-		}
-		authFilters = append(authFilters, resetFilter)
-		go resetLoop(resetFilter, preResetHeights, peer.GetLedger, 10*time.Second)
-	}
-
-	// start the peer server
-	auth := authHandler.ChainFilters(serverEndorser, authFilters...)
-	// Register the Endorser server
-	pb.RegisterEndorserServer(peerServer.Server(), auth)
-
-	go func() {
-		var grpcErr error
-		if grpcErr = peerServer.Start(); grpcErr != nil {
-			grpcErr = fmt.Errorf("grpc server exited with error: %s", grpcErr)
-		}
-		serve <- grpcErr
-	}()
 
 	// Block until grpc server exits
 	return <-serve
@@ -811,7 +765,7 @@ func adminHasSeparateListener(peerListenAddr string, adminListenAddress string) 
 	return adminPort != peerPort
 }
 
-func startAdminServer(peerListenAddr string, peerServer *grpc.Server, baseServerConfig comm.ServerConfig) {
+func startAdminServer(peerListenAddr string, peerServer *grpc.Server, metricsProvider metrics.Provider) {
 	adminListenAddress := viper.GetString("peer.adminService.listenAddress")
 	separateLsnrForAdmin := adminHasSeparateListener(peerListenAddr, adminListenAddress)
 	mspID := viper.GetString("peer.localMspId")
@@ -824,10 +778,17 @@ func startAdminServer(peerListenAddr string, peerServer *grpc.Server, baseServer
 			logger.Fatalf("Error loading secure config for admin service (%s)", err)
 		}
 		serverConfig.Logger = flogging.MustGetLogger("core.comm").With("server", "AdminServer")
-		serverConfig.ServerStatsHandler = baseServerConfig.ServerStatsHandler
-		serverConfig.UnaryInterceptors = baseServerConfig.UnaryInterceptors
-		serverConfig.StreamInterceptors = baseServerConfig.StreamInterceptors
-
+		serverConfig.MetricsProvider = metricsProvider
+		serverConfig.UnaryInterceptors = append(
+			serverConfig.UnaryInterceptors,
+			grpcmetrics.UnaryServerInterceptor(grpcmetrics.NewUnaryMetrics(metricsProvider)),
+			grpclogging.UnaryServerInterceptor(flogging.MustGetLogger("comm.grpc.server").Zap()),
+		)
+		serverConfig.StreamInterceptors = append(
+			serverConfig.StreamInterceptors,
+			grpcmetrics.StreamServerInterceptor(grpcmetrics.NewStreamMetrics(metricsProvider)),
+			grpclogging.StreamServerInterceptor(flogging.MustGetLogger("comm.grpc.server").Zap()),
+		)
 		adminServer, err := peer.NewPeerServer(adminListenAddress, serverConfig)
 		if err != nil {
 			logger.Fatalf("Failed to create admin server (%s)", err)
@@ -873,8 +834,7 @@ func secureDialOpts() []grpc.DialOption {
 // 2. Init the message crypto service;
 // 3. Init the security advisor;
 // 4. Init gossip related struct.
-func initGossipService(policyMgr policies.ChannelPolicyManagerGetter, metricsProvider metrics.Provider,
-	peerServer *comm.GRPCServer, serializedIdentity []byte, peerAddr string) error {
+func initGossipService(policyMgr policies.ChannelPolicyManagerGetter, peerServer *comm.GRPCServer, serializedIdentity []byte, peerAddr string) error {
 	var certs *gossipcommon.TLSCertificates
 	if peerServer.TLSEnabled() {
 		serverCert := peerServer.ServerCertificate()
@@ -894,18 +854,15 @@ func initGossipService(policyMgr policies.ChannelPolicyManagerGetter, metricsPro
 	)
 	secAdv := peergossip.NewSecurityAdvisor(mgmt.NewDeserializersManager())
 	bootstrap := viper.GetStringSlice("peer.gossip.bootstrap")
-	orgLeader := viper.GetBool("peer.gossip.orgLeader")
 
 	return service.InitGossipService(
 		serializedIdentity,
-		metricsProvider,
 		peerAddr,
 		peerServer.Server(),
 		certs,
 		messageCryptoService,
 		secAdv,
 		secureDialOpts,
-		orgLeader,
 		bootstrap...,
 	)
 }
@@ -962,84 +919,4 @@ func registerProverService(peerServer *comm.GRPCServer, aclProvider aclmgmt.ACLP
 	}
 	token.RegisterProverServer(peerServer.Server(), prover)
 	return nil
-}
-
-//go:generate counterfeiter -o mock/get_ledger.go -fake-name GetLedger getLedger
-//go:generate counterfeiter -o mock/peer_ledger.go -fake-name PeerLedger ../../core/ledger PeerLedger
-
-type getLedger func(string) ledger.PeerLedger
-
-func resetLoop(
-	resetFilter *reset,
-	preResetHeights map[string]uint64,
-	peerLedger getLedger,
-	interval time.Duration,
-) {
-	// periodically check to see if current ledger height(s) surpass prereset height(s)
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			logger.Info("Ledger rebuild: Checking if current ledger heights surpass prereset ledger heights")
-			logger.Debugf("Ledger rebuild: Number of ledgers still rebuilding before check: %d", len(preResetHeights))
-
-			for cid, height := range preResetHeights {
-				ledger := peerLedger(cid)
-				if ledger != nil {
-					bcInfo, err := ledger.GetBlockchainInfo()
-					if bcInfo != nil {
-						logger.Debugf("Ledger rebuild: channel [%s]: currentHeight [%d] : preresetHeight [%d]", cid, bcInfo.GetHeight(), height)
-						if bcInfo.GetHeight() >= height {
-							delete(preResetHeights, cid)
-						} else {
-							break
-						}
-					} else {
-						if err != nil {
-							logger.Warningf("Ledger rebuild: could not retrieve info for channel [%s]: %s", cid, err.Error())
-						}
-					}
-				}
-			}
-			logger.Debugf("Ledger rebuild: Number of ledgers still rebuilding after check: %d", len(preResetHeights))
-			if len(preResetHeights) == 0 {
-				logger.Infof("Ledger rebuild: Complete, all ledgers surpass prereset heights. Endorsement request processing will be enabled.")
-				err := kvledger.ClearPreResetHeight()
-				if err != nil {
-					logger.Warningf("Ledger rebuild: could not clear off prerest files: error=%s", err)
-				}
-				resetFilter.setReject(false)
-				return
-			}
-		}
-	}
-}
-
-//implements the auth.Filter interface
-type reset struct {
-	sync.RWMutex
-	next   pb.EndorserServer
-	reject bool
-}
-
-func (r *reset) setReject(reject bool) {
-	r.Lock()
-	defer r.Unlock()
-	r.reject = reject
-}
-
-// Init initializes Reset with the next EndorserServer
-func (r *reset) Init(next pb.EndorserServer) {
-	r.next = next
-}
-
-// ProcessProposal processes a signed proposal
-func (r *reset) ProcessProposal(ctx context.Context, signedProp *pb.SignedProposal) (*pb.ProposalResponse, error) {
-	r.RLock()
-	defer r.RUnlock()
-	if r.reject {
-		return nil, errors.New("endorse requests are blocked while ledgers are being rebuilt")
-	}
-	return r.next.ProcessProposal(ctx, signedProp)
 }

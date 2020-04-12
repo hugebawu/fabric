@@ -66,8 +66,8 @@ noverify = [
   name = "github.com/kr/pretty"
 
 [[constraint]]
+  branch = "master"
   name = "github.com/miekg/pkcs11"
-  version = "v1.0.2"
 
 [[constraint]]
   name = "github.com/mitchellh/mapstructure"
@@ -150,16 +150,12 @@ noverify = [
   version = "1.4.2"
 
 [[constraint]]
-  name = "go.etcd.io/etcd"
-  revision = "23731bf9ba556867089a9cc8db5e492ca6035fe8"
+  name = "github.com/coreos/etcd"
+  version = "3.3.8"
 
 [[constraint]]
   name = "go.uber.org/zap"
   version = "1.9.0"
-
-[[constraint]]
-  branch = "master"
-  name = "github.com/sykesm/zap-logfmt"
 
 [[constraint]]
   name = "github.com/grpc-ecosystem/go-grpc-middleware"
@@ -187,9 +183,5 @@ noverify = [
       unused-packages = false
 
   [[prune.project]]
-      name = "go.etcd.io/etcd"
+      name = "github.com/coreos/etcd"
       non-go = false
-
-[[constraint]]
-  name = "github.com/prometheus/client_golang"
-  version = "0.9.0"

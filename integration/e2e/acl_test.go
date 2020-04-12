@@ -248,7 +248,7 @@ func SetACLPolicy(network *nwo.Network, channel, policyName, policy string, orde
 	submitter := network.Peer("Org1", "peer0")
 	signer := network.Peer("Org2", "peer0")
 
-	config := nwo.GetConfig(network, submitter, orderer, channel)
+	config := nwo.GetConfigBlock(network, submitter, orderer, channel)
 	updatedConfig := proto.Clone(config).(*common.Config)
 
 	// set the policy
@@ -261,7 +261,7 @@ func SetACLPolicy(network *nwo.Network, channel, policyName, policy string, orde
 		}),
 	}
 
-	nwo.UpdateConfig(network, orderer, channel, config, updatedConfig, true, submitter, signer)
+	nwo.UpdateConfig(network, orderer, channel, config, updatedConfig, submitter, signer)
 }
 
 // GetTxIDFromBlock gets a transaction id from a block that has been
@@ -269,10 +269,16 @@ func SetACLPolicy(network *nwo.Network, channel, policyName, policy string, orde
 func GetTxIDFromBlockFile(blockFile string) string {
 	block := nwo.UnmarshalBlockFromFile(blockFile)
 
-	txID, err := utils.GetOrComputeTxIDFromEnvelope(block.Data.Data[0])
+	envelope, err := utils.GetEnvelopeFromBlock(block.Data.Data[0])
 	Expect(err).NotTo(HaveOccurred())
 
-	return txID
+	payload, err := utils.GetPayload(envelope)
+	Expect(err).NotTo(HaveOccurred())
+
+	chdr, err := utils.UnmarshalChannelHeader(payload.Header.ChannelHeader)
+	Expect(err).NotTo(HaveOccurred())
+
+	return chdr.TxId
 }
 
 // ToCLIChaincodeArgs converts string args to args for use with chaincode calls

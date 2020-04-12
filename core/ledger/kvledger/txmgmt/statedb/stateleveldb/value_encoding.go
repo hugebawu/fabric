@@ -33,10 +33,7 @@ func encodeValue(v *statedb.VersionedValue) ([]byte, error) {
 // or the new (v1.3 and later) encoding that supports metadata.
 func decodeValue(encodedValue []byte) (*statedb.VersionedValue, error) {
 	if oldFormatEncoding(encodedValue) {
-		val, ver, err := decodeValueOldFormat(encodedValue)
-		if err != nil {
-			return nil, err
-		}
+		val, ver := decodeValueOldFormat(encodedValue)
 		return &statedb.VersionedValue{Version: ver, Value: val, Metadata: nil}, nil
 	}
 	msg := &msgs.VersionedValueProto{}
@@ -44,10 +41,7 @@ func decodeValue(encodedValue []byte) (*statedb.VersionedValue, error) {
 	if err != nil {
 		return nil, err
 	}
-	ver, _, err := version.NewHeightFromBytes(msg.VersionBytes)
-	if err != nil {
-		return nil, err
-	}
+	ver, _ := version.NewHeightFromBytes(msg.VersionBytes)
 	val := msg.Value
 	metadata := msg.Metadata
 	// protobuf always makes an empty byte array as nil
@@ -59,7 +53,7 @@ func decodeValue(encodedValue []byte) (*statedb.VersionedValue, error) {
 
 // encodeValueOldFormat appends the value to the version, allows storage of version and value in binary form.
 // With the introduction of metadata feature in v1.3, we change the encoding (see function below). However, we retain
-// this function for test so as to make sure that we can decode old format and support mixed formats present
+// this funtion for test so as to make sure that we can decode old format and support mixed formats present
 // in a statedb. This function should be used only in tests to generate the encoding in old format
 func encodeValueOldFormat(value []byte, version *version.Height) []byte {
 	encodedValue := version.ToBytes()
@@ -75,13 +69,10 @@ func encodeValueOldFormat(value []byte, version *version.Height) []byte {
 // should not be used directly or in a tests. The function 'decodeValue' should be used
 // for all decodings - which is expected to detect the encoded format and direct the call
 // to this function for decoding the values encoded in the old format
-func decodeValueOldFormat(encodedValue []byte) ([]byte, *version.Height, error) {
-	height, n, err := version.NewHeightFromBytes(encodedValue)
-	if err != nil {
-		return nil, nil, err
-	}
+func decodeValueOldFormat(encodedValue []byte) ([]byte, *version.Height) {
+	height, n := version.NewHeightFromBytes(encodedValue)
 	value := encodedValue[n:]
-	return value, height, nil
+	return value, height
 }
 
 // oldFormatEncoding checks whether the value is encoded using the old (pre-v1.3) format

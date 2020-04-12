@@ -14,14 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hyperledger/fabric/common/metrics/disabled"
 	"github.com/hyperledger/fabric/gossip/common"
 	"github.com/hyperledger/fabric/gossip/discovery"
-	"github.com/hyperledger/fabric/gossip/metrics"
-	"github.com/hyperledger/fabric/gossip/metrics/mocks"
 	"github.com/hyperledger/fabric/gossip/util"
 	proto "github.com/hyperledger/fabric/protos/gossip"
-	"github.com/stretchr/testify/assert"
 )
 
 func init() {
@@ -39,8 +35,7 @@ func TestNewAdapter(t *testing.T) {
 	peersCluster := newClusterOfPeers("0")
 	peersCluster.addPeer("peer0", mockGossip)
 
-	NewAdapter(mockGossip, selfNetworkMember.PKIid, []byte("channel0"),
-		metrics.NewGossipMetrics(&disabled.Provider{}).ElectionMetrics)
+	NewAdapter(mockGossip, selfNetworkMember.PKIid, []byte("channel0"))
 }
 
 func TestAdapterImpl_CreateMessage(t *testing.T) {
@@ -51,8 +46,7 @@ func TestAdapterImpl_CreateMessage(t *testing.T) {
 	}
 	mockGossip := newGossip("peer0", selfNetworkMember, nil)
 
-	adapter := NewAdapter(mockGossip, selfNetworkMember.PKIid, []byte("channel0"),
-		metrics.NewGossipMetrics(&disabled.Provider{}).ElectionMetrics)
+	adapter := NewAdapter(mockGossip, selfNetworkMember.PKIid, []byte("channel0"))
 	msg := adapter.CreateMessage(true)
 
 	if !msg.(*msgImpl).msg.IsLeadershipMsg() {
@@ -320,15 +314,21 @@ func createCluster(pki2org map[string]string, peers ...int) (*clusterOfPeers, ma
 			PKIid:    peerPKID,
 		}
 
+<<<<<<< HEAD
 		mockGossip := newGossip(peerEndpoint, peerMember, pki2org)
 		adapter := NewAdapter(mockGossip, peerMember.PKIid, []byte("channel0"),
 			metrics.NewGossipMetrics(&disabled.Provider{}).ElectionMetrics)
+=======
+		mockGossip := newGossip(peerEndpoint, peerMember)
+		adapter := NewAdapter(mockGossip, peerMember.PKIid, []byte("channel0"))
+>>>>>>> tag-v1.4.0
 		adapters[peerEndpoint] = adapter.(*adapterImpl)
 		cluster.addPeer(peerEndpoint, mockGossip)
 	}
 
 	return cluster, adapters
 }
+<<<<<<< HEAD
 
 func TestReportMetrics(t *testing.T) {
 
@@ -361,3 +361,5 @@ func TestReportMetrics(t *testing.T) {
 	)
 
 }
+=======
+>>>>>>> tag-v1.4.0

@@ -27,7 +27,6 @@ import (
 type Runtime interface {
 	Start(ccci *ccprovider.ChaincodeContainerInfo, codePackage []byte) error
 	Stop(ccci *ccprovider.ChaincodeContainerInfo) error
-	Wait(ccci *ccprovider.ChaincodeContainerInfo) (int, error)
 }
 
 // Launcher is used to launch chaincode runtimes.

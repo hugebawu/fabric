@@ -13,7 +13,6 @@ import (
 
 	"github.com/hyperledger/fabric/gossip/common"
 	"github.com/hyperledger/fabric/gossip/discovery"
-	"github.com/hyperledger/fabric/gossip/metrics"
 	"github.com/hyperledger/fabric/gossip/util"
 	proto "github.com/hyperledger/fabric/protos/gossip"
 )
@@ -72,12 +71,10 @@ type adapterImpl struct {
 
 	doneCh   chan struct{}
 	stopOnce *sync.Once
-	metrics  *metrics.ElectionMetrics
 }
 
 // NewAdapter creates new leader election adapter
-func NewAdapter(gossip gossip, pkiid common.PKIidType, channel common.ChainID,
-	metrics *metrics.ElectionMetrics) LeaderElectionAdapter {
+func NewAdapter(gossip gossip, pkiid common.PKIidType, channel common.ChainID) LeaderElectionAdapter {
 	return &adapterImpl{
 		gossip:    gossip,
 		selfPKIid: pkiid,
@@ -91,7 +88,6 @@ func NewAdapter(gossip gossip, pkiid common.PKIidType, channel common.ChainID,
 
 		doneCh:   make(chan struct{}),
 		stopOnce: &sync.Once{},
-		metrics:  metrics,
 	}
 }
 
@@ -159,14 +155,6 @@ func (ai *adapterImpl) Peers() []Peer {
 	}
 
 	return res
-}
-
-func (ai *adapterImpl) ReportMetrics(isLeader bool) {
-	var leadershipBit float64
-	if isLeader {
-		leadershipBit = 1
-	}
-	ai.metrics.Declaration.With("channel", string(ai.channel)).Set(leadershipBit)
 }
 
 func (ai *adapterImpl) Stop() {

@@ -10,7 +10,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/hyperledger/fabric/common/metrics"
 	"github.com/hyperledger/fabric/gossip/util"
 	proto "github.com/hyperledger/fabric/protos/gossip"
 )
@@ -145,25 +144,4 @@ func (b *PayloadsBufferImpl) Size() int {
 // Close cleanups resources and channels in maintained
 func (b *PayloadsBufferImpl) Close() {
 	close(b.readyChan)
-}
-
-type metricsBuffer struct {
-	PayloadsBuffer
-	sizeMetrics metrics.Gauge
-	chainID     string
-}
-
-func (mb *metricsBuffer) Push(payload *proto.Payload) {
-	mb.PayloadsBuffer.Push(payload)
-	mb.reportSize()
-}
-
-func (mb *metricsBuffer) Pop() *proto.Payload {
-	pl := mb.PayloadsBuffer.Pop()
-	mb.reportSize()
-	return pl
-}
-
-func (mb *metricsBuffer) reportSize() {
-	mb.sizeMetrics.With("channel", mb.chainID).Set(float64(mb.Size()))
 }

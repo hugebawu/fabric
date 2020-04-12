@@ -13,10 +13,10 @@ import (
 	"sync/atomic"
 
 	"github.com/hyperledger/fabric/gossip/common"
-	"github.com/hyperledger/fabric/gossip/metrics"
 	"github.com/hyperledger/fabric/gossip/util"
 	proto "github.com/hyperledger/fabric/protos/gossip"
 	"github.com/pkg/errors"
+	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 )
 
@@ -34,7 +34,6 @@ type connFactory interface {
 }
 
 type connectionStore struct {
-	config           ConnConfig
 	logger           util.Logger            // logger
 	isClosing        bool                   // whether this connection store is shutting down
 	connFactory      connFactory            // creates a connection to remote peer
@@ -44,14 +43,13 @@ type connectionStore struct {
 	// used to prevent concurrent connection establishment to the same remote endpoint
 }
 
-func newConnStore(connFactory connFactory, logger util.Logger, config ConnConfig) *connectionStore {
+func newConnStore(connFactory connFactory, logger util.Logger) *connectionStore {
 	return &connectionStore{
 		connFactory:      connFactory,
 		isClosing:        false,
 		pki2Conn:         make(map[string]*connection),
 		destinationLocks: make(map[string]*sync.Mutex),
 		logger:           logger,
-		config:           config,
 	}
 }
 
@@ -87,9 +85,6 @@ func (cs *connectionStore) getConnection(peer *RemotePeer) (*connection, error) 
 	cs.RUnlock()
 
 	createdConnection, err := cs.connFactory.createConnection(endpoint, pkiID)
-	if err == nil {
-		cs.logger.Debugf("Created new connection to %s, %s", endpoint, pkiID)
-	}
 
 	destinationLock.Unlock()
 
@@ -117,16 +112,6 @@ func (cs *connectionStore) getConnection(peer *RemotePeer) (*connection, error) 
 	// no one connected to us AND we failed connecting!
 	if err != nil {
 		return nil, err
-	}
-
-	// At this point we know the latest PKI-ID of the remote peer.
-	// Perhaps we are trying to connect to a peer that changed its PKI-ID.
-	// Ensure that we are not already connected to that PKI-ID,
-	// and if so - close the old connection in order to keep the latest one.
-	// We keep the latest one because the remote peer is going to close
-	// our old connection anyway once it sensed this connection handshake.
-	if conn, exists := cs.pki2Conn[string(createdConnection.pkiID)]; exists {
-		conn.close()
 	}
 
 	// at this point in the code, we created a connection to a remote peer
@@ -176,8 +161,7 @@ func (cs *connectionStore) shutdown() {
 	wg.Wait()
 }
 
-func (cs *connectionStore) onConnected(serverStream proto.Gossip_GossipStreamServer,
-	connInfo *proto.ConnectionInfo, metrics *metrics.CommMetrics) *connection {
+func (cs *connectionStore) onConnected(serverStream proto.Gossip_GossipStreamServer, connInfo *proto.ConnectionInfo) *connection {
 	cs.Lock()
 	defer cs.Unlock()
 
@@ -185,12 +169,11 @@ func (cs *connectionStore) onConnected(serverStream proto.Gossip_GossipStreamSer
 		c.close()
 	}
 
-	return cs.registerConn(connInfo, serverStream, metrics)
+	return cs.registerConn(connInfo, serverStream)
 }
 
-func (cs *connectionStore) registerConn(connInfo *proto.ConnectionInfo,
-	serverStream proto.Gossip_GossipStreamServer, metrics *metrics.CommMetrics) *connection {
-	conn := newConnection(nil, nil, nil, serverStream, metrics, cs.config)
+func (cs *connectionStore) registerConn(connInfo *proto.ConnectionInfo, serverStream proto.Gossip_GossipStreamServer) *connection {
+	conn := newConnection(nil, nil, nil, serverStream)
 	conn.pkiID = connInfo.ID
 	conn.info = connInfo
 	conn.logger = cs.logger
@@ -207,31 +190,20 @@ func (cs *connectionStore) closeByPKIid(pkiID common.PKIidType) {
 	}
 }
 
-func newConnection(cl proto.GossipClient, c *grpc.ClientConn, cs proto.Gossip_GossipStreamClient,
-	ss proto.Gossip_GossipStreamServer, metrics *metrics.CommMetrics, config ConnConfig) *connection {
+func newConnection(cl proto.GossipClient, c *grpc.ClientConn, cs proto.Gossip_GossipStreamClient, ss proto.Gossip_GossipStreamServer) *connection {
 	connection := &connection{
-		metrics:      metrics,
-		outBuff:      make(chan *msgSending, config.SendBuffSize),
+		outBuff:      make(chan *msgSending, util.GetIntOrDefault("peer.gossip.sendBuffSize", defSendBuffSize)),
 		cl:           cl,
 		conn:         c,
 		clientStream: cs,
 		serverStream: ss,
 		stopFlag:     int32(0),
-		stopChan:     make(chan struct{}),
-		recvBuffSize: config.RecvBuffSize,
+		stopChan:     make(chan struct{}, 1),
 	}
 	return connection
 }
 
-// ConnConfig is the configuration required to initialize a new conn
-type ConnConfig struct {
-	RecvBuffSize int
-	SendBuffSize int
-}
-
 type connection struct {
-	recvBuffSize int
-	metrics      *metrics.CommMetrics
 	cancel       context.CancelFunc
 	info         *proto.ConnectionInfo
 	outBuff      chan *msgSending
@@ -257,7 +229,7 @@ func (conn *connection) close() {
 		return
 	}
 
-	close(conn.stopChan)
+	conn.stopChan <- struct{}{}
 
 	conn.drainOutputBuffer()
 	conn.Lock()
@@ -281,7 +253,7 @@ func (conn *connection) toDie() bool {
 
 func (conn *connection) send(msg *proto.SignedGossipMessage, onErr func(error), shouldBlock blockingBehavior) {
 	if conn.toDie() {
-		conn.logger.Debugf("Aborting send() to %s because connection is closing", conn.info.Endpoint)
+		conn.logger.Debug("Aborting send() to ", conn.info.Endpoint, "because connection is closing")
 		return
 	}
 
@@ -290,34 +262,36 @@ func (conn *connection) send(msg *proto.SignedGossipMessage, onErr func(error), 
 		onErr:    onErr,
 	}
 
-	select {
-	case conn.outBuff <- m:
-		// room in channel, successfully sent message, nothing to do
-	default: // did not send
-		if shouldBlock {
-			conn.outBuff <- m // try again, and wait to send
-		} else {
-			conn.metrics.BufferOverflow.Add(1)
-			conn.logger.Debugf("Buffer to %s overflowed, dropping message %s", conn.info.Endpoint, msg)
+	if len(conn.outBuff) == cap(conn.outBuff) {
+		if conn.logger.IsEnabledFor(zapcore.DebugLevel) {
+			conn.logger.Debug("Buffer to", conn.info.Endpoint, "overflowed, dropping message", msg.String())
+		}
+		if !shouldBlock {
+			return
 		}
 	}
+
+	conn.outBuff <- m
 }
 
 func (conn *connection) serviceConnection() error {
 	errChan := make(chan error, 1)
-	msgChan := make(chan *proto.SignedGossipMessage, conn.recvBuffSize)
+	msgChan := make(chan *proto.SignedGossipMessage, util.GetIntOrDefault("peer.gossip.recvBuffSize", defRecvBuffSize))
+	quit := make(chan struct{})
 	// Call stream.Recv() asynchronously in readFromStream(),
 	// and wait for either the Recv() call to end,
 	// or a signal to close the connection, which exits
 	// the method and makes the Recv() call to fail in the
 	// readFromStream() method
-	go conn.readFromStream(errChan, msgChan)
+	go conn.readFromStream(errChan, quit, msgChan)
 
 	go conn.writeToStream()
 
 	for !conn.toDie() {
 		select {
-		case <-conn.stopChan:
+		case stop := <-conn.stopChan:
+			conn.logger.Debug("Closing reading from stream")
+			conn.stopChan <- stop
 			return nil
 		case err := <-errChan:
 			return err
@@ -342,27 +316,22 @@ func (conn *connection) writeToStream() {
 				go m.onErr(err)
 				return
 			}
-			conn.metrics.SentMessages.Add(1)
-		case <-conn.stopChan:
+		case stop := <-conn.stopChan:
 			conn.logger.Debug("Closing writing to stream")
+			conn.stopChan <- stop
 			return
 		}
 	}
 }
 
 func (conn *connection) drainOutputBuffer() {
-	// Read from the buffer until it is empty.
-	// There may be multiple concurrent readers.
-	for {
-		select {
-		case <-conn.outBuff:
-		default:
-			return
-		}
+	// Drain the output buffer
+	for len(conn.outBuff) > 0 {
+		<-conn.outBuff
 	}
 }
 
-func (conn *connection) readFromStream(errChan chan error, msgChan chan *proto.SignedGossipMessage) {
+func (conn *connection) readFromStream(errChan chan error, quit chan struct{}, msgChan chan *proto.SignedGossipMessage) {
 	for !conn.toDie() {
 		stream := conn.getStream()
 		if stream == nil {
@@ -380,7 +349,6 @@ func (conn *connection) readFromStream(errChan chan error, msgChan chan *proto.S
 			conn.logger.Debugf("Got error, aborting: %v", err)
 			return
 		}
-		conn.metrics.ReceivedMessages.Add(1)
 		msg, err := envelope.ToGossipMessage()
 		if err != nil {
 			errChan <- err
@@ -389,8 +357,7 @@ func (conn *connection) readFromStream(errChan chan error, msgChan chan *proto.S
 		}
 		select {
 		case msgChan <- msg:
-		case <-conn.stopChan:
-			conn.logger.Debug("Closing reading from stream")
+		case <-quit:
 			return
 		}
 	}

@@ -42,9 +42,6 @@ orderers:
 - name: orderer0
   organization: orderer-org
 
-orderercapabilities:
-  v20: false
-  
 channels:
 - name: testchannel
   profile: TwoOrgsChannel

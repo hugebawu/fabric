@@ -90,10 +90,11 @@ Orderer: &OrdererDefaults
               ClientTLSCert: path/to/ClientTLSCert2
               ServerTLSCert: path/to/ServerTLSCert2
         Options:
-            TickInterval: 500
+            TickInterval: 100
             ElectionTick: 10
             HeartbeatTick: 1
-            MaxInflightBlocks: 5
+            MaxInflightMsgs: 256
+            MaxSizePerMsg: 1048576
     Organizations:
     Policies:
         Readers:
