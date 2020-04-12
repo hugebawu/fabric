@@ -216,7 +216,7 @@ that are highly structured in their relationships to those that are more
 peer-to-peer.
 
 We’ll learn more about the Hyperledger Fabric consensus mechanisms, which
-currently include SOLO, Kafka, and Raft.
+currently include SOLO and Kafka.
 
 Where can I learn more?
 -----------------------

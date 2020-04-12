@@ -26,8 +26,6 @@ Flags:
                         --help-man).
   --hostname="0.0.0.0"  The hostname or IP on which the REST server will listen
   --port=7059           The port on which the REST server will listen
-  --CORS=CORS ...       Allowable CORS domains, e.g. '*' or 'www.example.com'
-                        (may be repeated).
 
 ```
 

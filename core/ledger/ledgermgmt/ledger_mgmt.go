@@ -44,7 +44,6 @@ type Initializer struct {
 	DeployedChaincodeInfoProvider ledger.DeployedChaincodeInfoProvider
 	MembershipInfoProvider        ledger.MembershipInfoProvider
 	MetricsProvider               metrics.Provider
-	HealthCheckRegistry           ledger.HealthCheckRegistry
 }
 
 // Initialize initializes ledgermgmt
@@ -70,16 +69,12 @@ func initialize(initializer *Initializer) {
 	if err != nil {
 		panic(errors.WithMessage(err, "Error in instantiating ledger provider"))
 	}
-	err = provider.Initialize(&ledger.Initializer{
+	provider.Initialize(&ledger.Initializer{
 		StateListeners:                finalStateListeners,
 		DeployedChaincodeInfoProvider: initializer.DeployedChaincodeInfoProvider,
 		MembershipInfoProvider:        initializer.MembershipInfoProvider,
 		MetricsProvider:               initializer.MetricsProvider,
-		HealthCheckRegistry:           initializer.HealthCheckRegistry,
 	})
-	if err != nil {
-		panic(errors.WithMessage(err, "Error initializing ledger provider"))
-	}
 	ledgerProvider = provider
 	logger.Info("ledger mgmt initialized")
 }

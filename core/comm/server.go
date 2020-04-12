@@ -14,9 +14,8 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
-	"time"
 
-	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	"github.com/grpc-ecosystem/go-grpc-middleware"
 	"google.golang.org/grpc"
 )
 
@@ -98,13 +97,6 @@ func NewGRPCServerFromListener(listener net.Listener, serverConfig ServerConfig)
 				SessionTicketsDisabled: true,
 				CipherSuites:           secureConfig.CipherSuites,
 			}
-
-			if serverConfig.SecOpts.TimeShift > 0 {
-				timeShift := serverConfig.SecOpts.TimeShift
-				grpcServer.tlsConfig.Time = func() time.Time {
-					return time.Now().Add((-1) * timeShift)
-				}
-			}
 			grpcServer.tlsConfig.ClientAuth = tls.RequestClientCert
 			//check if client authentication is required
 			if secureConfig.RequireClientCert {
@@ -156,8 +148,9 @@ func NewGRPCServerFromListener(listener net.Listener, serverConfig ServerConfig)
 		)
 	}
 
-	if serverConfig.ServerStatsHandler != nil {
-		serverOpts = append(serverOpts, grpc.StatsHandler(serverConfig.ServerStatsHandler))
+	if serverConfig.MetricsProvider != nil {
+		sh := NewServerStatsHandler(serverConfig.MetricsProvider)
+		serverOpts = append(serverOpts, grpc.StatsHandler(sh))
 	}
 
 	grpcServer.server = grpc.NewServer(serverOpts...)

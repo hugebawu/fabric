@@ -35,7 +35,6 @@ const (
 	rebuildableBlockIndex    rebuildable = 2
 	rebuildableConfigHistory rebuildable = 4
 	rebuildableHistoryDB     rebuildable = 8
-	rebuildableBookkeeper    rebuildable = 16
 )
 
 var (
@@ -80,44 +79,22 @@ func (e *env) closeAllLedgersAndDrop(flags rebuildable) {
 	}
 
 	if flags&rebuildableConfigHistory == rebuildableConfigHistory {
-		configHistoryPath := getConfigHistoryDBPath()
-		logger.Infof("Deleting configHistory db path [%s]", configHistoryPath)
-		e.verifyNonEmptyDirExists(configHistoryPath)
-		e.assert.NoError(os.RemoveAll(configHistoryPath))
+		configHistory := getConfigHistoryDBPath()
+		logger.Infof("Deleting configHistory db path [%s]", configHistory)
+		e.verifyNonEmptyDirExists(configHistory)
+		e.assert.NoError(os.RemoveAll(configHistory))
 	}
-
-	if flags&rebuildableBookkeeper == rebuildableBookkeeper {
-		bookkeeperPath := getBookkeeperDBPath()
-		logger.Infof("Deleting bookkeeper db path [%s]", bookkeeperPath)
-		e.verifyNonEmptyDirExists(bookkeeperPath)
-		e.assert.NoError(os.RemoveAll(bookkeeperPath))
-	}
-
-	if flags&rebuildableHistoryDB == rebuildableHistoryDB {
-		historyPath := getHistoryDBPath()
-		logger.Infof("Deleting history db path [%s]", historyPath)
-		e.verifyNonEmptyDirExists(historyPath)
-		e.assert.NoError(os.RemoveAll(historyPath))
-	}
-
-	e.verifyRebuilableDoesNotExist(flags)
 }
 
 func (e *env) verifyRebuilablesExist(flags rebuildable) {
-	if flags&rebuildableBlockIndex == rebuildableBlockIndex {
+	if flags&rebuildableStatedb == rebuildableBlockIndex {
 		e.verifyNonEmptyDirExists(getBlockIndexDBPath())
 	}
-	if flags&rebuildableStatedb == rebuildableStatedb {
+	if flags&rebuildableBlockIndex == rebuildableStatedb {
 		e.verifyNonEmptyDirExists(getLevelstateDBPath())
 	}
 	if flags&rebuildableConfigHistory == rebuildableConfigHistory {
 		e.verifyNonEmptyDirExists(getConfigHistoryDBPath())
-	}
-	if flags&rebuildableBookkeeper == rebuildableBookkeeper {
-		e.verifyNonEmptyDirExists(getBookkeeperDBPath())
-	}
-	if flags&rebuildableHistoryDB == rebuildableHistoryDB {
-		e.verifyNonEmptyDirExists(getHistoryDBPath())
 	}
 }
 
@@ -125,17 +102,11 @@ func (e *env) verifyRebuilableDoesNotExist(flags rebuildable) {
 	if flags&rebuildableStatedb == rebuildableStatedb {
 		e.verifyDirDoesNotExist(getLevelstateDBPath())
 	}
-	if flags&rebuildableBlockIndex == rebuildableBlockIndex {
+	if flags&rebuildableStatedb == rebuildableBlockIndex {
 		e.verifyDirDoesNotExist(getBlockIndexDBPath())
 	}
 	if flags&rebuildableConfigHistory == rebuildableConfigHistory {
 		e.verifyDirDoesNotExist(getConfigHistoryDBPath())
-	}
-	if flags&rebuildableBookkeeper == rebuildableBookkeeper {
-		e.verifyDirDoesNotExist(getBookkeeperDBPath())
-	}
-	if flags&rebuildableHistoryDB == rebuildableHistoryDB {
-		e.verifyDirDoesNotExist(getHistoryDBPath())
 	}
 }
 
@@ -166,8 +137,7 @@ func initLedgerMgmt() {
 	identityDeserializerFactory := func(chainID string) msp.IdentityDeserializer {
 		return mgmt.GetManagerForChain(chainID)
 	}
-	mspID := viper.GetString("peer.localMspId")
-	membershipInfoProvider := privdata.NewMembershipInfoProvider(mspID, createSelfSignedData(), identityDeserializerFactory)
+	membershipInfoProvider := privdata.NewMembershipInfoProvider(createSelfSignedData(), identityDeserializerFactory)
 
 	ledgermgmt.InitializeExistingTestEnvWithInitializer(
 		&ledgermgmt.Initializer{
@@ -215,12 +185,4 @@ func getBlockIndexDBPath() string {
 
 func getConfigHistoryDBPath() string {
 	return ledgerconfig.GetConfigHistoryPath()
-}
-
-func getHistoryDBPath() string {
-	return ledgerconfig.GetHistoryLevelDBPath()
-}
-
-func getBookkeeperDBPath() string {
-	return ledgerconfig.GetInternalBookkeeperPath()
 }

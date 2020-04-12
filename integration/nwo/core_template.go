@@ -103,7 +103,6 @@ peer:
     enabled:     false
     listenAddress: 127.0.0.1:{{ .PeerPort Peer "ProfilePort" }}
   adminService:
-    listenAddress: 127.0.0.1:{{ .PeerPort Peer "AdminServicePort" }}
   handlers:
     authFilters:
     - name: DefaultAuth
@@ -154,7 +153,7 @@ chaincode:
   car:
     runtime: $(BASE_DOCKER_NS)/fabric-baseos:$(ARCH)-$(BASE_VERSION)
   java:
-    runtime: $(DOCKER_NS)/fabric-javaenv:$(TWO_DIGIT_VERSION)
+    runtime: $(DOCKER_NS)/fabric-javaenv:$(ARCH)-$(PROJECT_VERSION)
   node:
       runtime: $(BASE_DOCKER_NS)/fabric-baseimage:$(ARCH)-$(BASE_VERSION)
   startuptimeout: 300s

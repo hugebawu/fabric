@@ -7,13 +7,12 @@ SPDX-License-Identifier: Apache-2.0
 package graph
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func TestPermute(t *testing.T) {
+func TestF(t *testing.T) {
 	vR := NewTreeVertex("r", nil)
 	vR.Threshold = 2
 
@@ -35,7 +34,7 @@ func TestPermute(t *testing.T) {
 		vF.AddDescendant(NewTreeVertex(id, nil))
 	}
 
-	permutations := vR.ToTree().Permute(1000)
+	permutations := vR.ToTree().Permute()
 	// For a sub-tree with r-(D,E) we have 9 combinations (3 combinations of each sub-tree where D and E are the roots)
 	// For a sub-tree with r-(D,F) we have 9 combinations from the same logic
 	// For a sub-tree with r-(E,F) we have 9 combinations too
@@ -61,14 +60,4 @@ func TestPermute(t *testing.T) {
 	// Last combination is a right most traversal on the combination graph
 	expectedScan = []string{"r", "E", "F", "b", "c", "2", "3"}
 	assert.Equal(t, expectedScan, listCombination(permutations[26].BFS()))
-}
-
-func TestPermuteTooManyCombinations(t *testing.T) {
-	root := NewTreeVertex("r", nil)
-	root.Threshold = 500
-	for i := 0; i < 1000; i++ {
-		root.AddDescendant(NewTreeVertex(fmt.Sprintf("%d", i), nil))
-	}
-	permutations := root.ToTree().Permute(501)
-	assert.Len(t, permutations, 501)
 }

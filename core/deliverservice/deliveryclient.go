@@ -29,7 +29,7 @@ var logger = flogging.MustGetLogger("deliveryClient")
 const (
 	defaultReConnectTotalTimeThreshold = time.Second * 60 * 60
 	defaultConnectionTimeout           = time.Second * 3
-	defaultReConnectBackoffThreshold   = time.Hour
+	defaultReConnectBackoffThreshold   = float64(time.Hour)
 )
 
 func getReConnectTotalTimeThreshold() time.Duration {
@@ -40,12 +40,8 @@ func getConnectionTimeout() time.Duration {
 	return util.GetDurationOrDefault("peer.deliveryclient.connTimeout", defaultConnectionTimeout)
 }
 
-func getReConnectBackoffThreshold() time.Duration {
-	return util.GetDurationOrDefault("peer.deliveryclient.reConnectBackoffThreshold", defaultReConnectBackoffThreshold)
-}
-
-func staticRootsEnabled() bool {
-	return viper.GetBool("peer.deliveryclient.staticRootsEnabled")
+func getReConnectBackoffThreshold() float64 {
+	return util.GetFloat64OrDefault("peer.deliveryclient.reConnectBackoffThreshold", defaultReConnectBackoffThreshold)
 }
 
 // DeliverService used to communicate with orderers to obtain
@@ -60,8 +56,8 @@ type DeliverService interface {
 	// to channel peers.
 	StopDeliverForChannel(chainID string) error
 
-	// UpdateEndpoints updates the ordering endpoints for the given chain.
-	UpdateEndpoints(chainID string, connCriteria ConnectionCriteria) error
+	// UpdateEndpoints
+	UpdateEndpoints(chainID string, endpoints []string) error
 
 	// Stop terminates delivery service and closes the connection
 	Stop()
@@ -71,16 +67,10 @@ type DeliverService interface {
 // maintains connection to the ordering service and maps of
 // blocks providers
 type deliverServiceImpl struct {
-	connConfig     ConnectionCriteria
 	conf           *Config
-	deliverClients map[string]*deliverClient
+	blockProviders map[string]blocksprovider.BlocksProvider
 	lock           sync.RWMutex
 	stopping       bool
-}
-
-type deliverClient struct {
-	bp      blocksprovider.BlocksProvider
-	bclient *broadcastClient
 }
 
 // Config dictates the DeliveryService's properties,
@@ -88,9 +78,8 @@ type deliverClient struct {
 // how it verifies messages received from it,
 // and how it disseminates the messages to other peers
 type Config struct {
-	IsStaticLeader bool
 	// ConnFactory returns a function that creates a connection to an endpoint
-	ConnFactory func(channelID string, endpointOverrides map[string]*comm.OrdererEndpoint) func(endpointCriteria comm.EndpointCriteria) (*grpc.ClientConn, error)
+	ConnFactory func(channelID string) func(endpoint string) (*grpc.ClientConn, error)
 	// ABCFactory creates an AtomicBroadcastClient out of a connection
 	ABCFactory func(*grpc.ClientConn) orderer.AtomicBroadcastClient
 	// CryptoSvc performs cryptographic actions like message verification and signing
@@ -99,73 +88,18 @@ type Config struct {
 	// Gossip enables to enumerate peers in the channel, send a message to peers,
 	// and add a block to the gossip state transfer layer
 	Gossip blocksprovider.GossipServiceAdapter
-}
-
-// ConnectionCriteria defines how to connect to ordering service nodes.
-type ConnectionCriteria struct {
-	// Endpoints specifies the endpoints of the ordering service.
-	OrdererEndpoints []string
-	// Organizations denotes a list of organizations
-	Organizations []string
-	// OrdererEndpointsByOrg specifies the endpoints of the ordering service grouped by orgs.
-	OrdererEndpointsByOrg map[string][]string
-	// OrdererEndpointOverrides specifies a map of endpoints to override.  The map
-	// key is the configured endpoint address to match and the value is the
-	// endpoint to use instead.
-	OrdererEndpointOverrides map[string]*comm.OrdererEndpoint
-}
-
-func (cc ConnectionCriteria) toEndpointCriteria() []comm.EndpointCriteria {
-	var res []comm.EndpointCriteria
-
-	// Iterate over per org criteria
-	for _, org := range cc.Organizations {
-		endpoints := cc.OrdererEndpointsByOrg[org]
-		if len(endpoints) == 0 {
-			// No endpoints for that org
-			continue
-		}
-
-		for _, endpoint := range endpoints {
-			// check if we need to override the endpoint
-			if override, ok := cc.OrdererEndpointOverrides[endpoint]; ok {
-				endpoint = override.Address
-			}
-			res = append(res, comm.EndpointCriteria{
-				Organizations: []string{org},
-				Endpoint:      endpoint,
-			})
-		}
-	}
-
-	// If we have some per organization endpoint, don't continue further.
-	if len(res) > 0 {
-		return res
-	}
-
-	for _, endpoint := range cc.OrdererEndpoints {
-		// check if we need to override the endpoint
-		if override, ok := cc.OrdererEndpointOverrides[endpoint]; ok {
-			endpoint = override.Address
-		}
-		res = append(res, comm.EndpointCriteria{
-			Organizations: cc.Organizations,
-			Endpoint:      endpoint,
-		})
-	}
-
-	return res
+	// Endpoints specifies the endpoints of the ordering service
+	Endpoints []string
 }
 
 // NewDeliverService construction function to create and initialize
 // delivery service instance. It tries to establish connection to
 // the specified in the configuration ordering service, in case it
 // fails to dial to it, return nil
-func NewDeliverService(conf *Config, connConfig ConnectionCriteria) (*deliverServiceImpl, error) {
+func NewDeliverService(conf *Config) (DeliverService, error) {
 	ds := &deliverServiceImpl{
-		connConfig:     connConfig,
 		conf:           conf,
-		deliverClients: make(map[string]*deliverClient),
+		blockProviders: make(map[string]blocksprovider.BlocksProvider),
 	}
 	if err := ds.validateConfiguration(); err != nil {
 		return nil, err
@@ -173,37 +107,33 @@ func NewDeliverService(conf *Config, connConfig ConnectionCriteria) (*deliverSer
 	return ds, nil
 }
 
-func (d *deliverServiceImpl) UpdateEndpoints(chainID string, connCriteria ConnectionCriteria) error {
-	d.lock.RLock()
-	defer d.lock.RUnlock()
-
-	// update the overrides
-	connCriteria.OrdererEndpointOverrides = d.connConfig.OrdererEndpointOverrides
+func (d *deliverServiceImpl) UpdateEndpoints(chainID string, endpoints []string) error {
 	// Use chainID to obtain blocks provider and pass endpoints
 	// for update
-	if dc, ok := d.deliverClients[chainID]; ok {
+	if bp, ok := d.blockProviders[chainID]; ok {
 		// We have found specified channel so we can safely update it
-		dc.bclient.UpdateEndpoints(connCriteria.toEndpointCriteria())
+		bp.UpdateOrderingEndpoints(endpoints)
 		return nil
 	}
 	return errors.New(fmt.Sprintf("Channel with %s id was not found", chainID))
 }
 
 func (d *deliverServiceImpl) validateConfiguration() error {
-	if d.conf.Gossip == nil {
+	conf := d.conf
+	if len(conf.Endpoints) == 0 {
+		return errors.New("no endpoints specified")
+	}
+	if conf.Gossip == nil {
 		return errors.New("no gossip provider specified")
 	}
-	if d.conf.ABCFactory == nil {
+	if conf.ABCFactory == nil {
 		return errors.New("no AtomicBroadcast factory specified")
 	}
-	if d.conf.ConnFactory == nil {
+	if conf.ConnFactory == nil {
 		return errors.New("no connection factory specified")
 	}
-	if d.conf.CryptoSvc == nil {
+	if conf.CryptoSvc == nil {
 		return errors.New("no crypto service specified")
-	}
-	if len(d.connConfig.OrdererEndpoints) == 0 && len(d.connConfig.OrdererEndpointsByOrg) == 0 {
-		return errors.New("no endpoints specified")
 	}
 	return nil
 }
@@ -220,17 +150,14 @@ func (d *deliverServiceImpl) StartDeliverForChannel(chainID string, ledgerInfo b
 		logger.Errorf(errMsg)
 		return errors.New(errMsg)
 	}
-	if _, exist := d.deliverClients[chainID]; exist {
+	if _, exist := d.blockProviders[chainID]; exist {
 		errMsg := fmt.Sprintf("Delivery service - block provider already exists for %s found, can't start delivery", chainID)
 		logger.Errorf(errMsg)
 		return errors.New(errMsg)
 	} else {
 		client := d.newClient(chainID, ledgerInfo)
-		logger.Info("This peer will retrieve blocks from ordering service and disseminate to other peers in the organization for channel", chainID)
-		d.deliverClients[chainID] = &deliverClient{
-			bp:      blocksprovider.NewBlocksProvider(chainID, client, d.conf.Gossip, d.conf.CryptoSvc),
-			bclient: client,
-		}
+		logger.Debug("This peer will pass blocks from orderer service to other peers for channel", chainID)
+		d.blockProviders[chainID] = blocksprovider.NewBlocksProvider(chainID, client, d.conf.Gossip, d.conf.CryptoSvc)
 		go d.launchBlockProvider(chainID, finalizer)
 	}
 	return nil
@@ -238,13 +165,13 @@ func (d *deliverServiceImpl) StartDeliverForChannel(chainID string, ledgerInfo b
 
 func (d *deliverServiceImpl) launchBlockProvider(chainID string, finalizer func()) {
 	d.lock.RLock()
-	dc := d.deliverClients[chainID]
+	pb := d.blockProviders[chainID]
 	d.lock.RUnlock()
-	if dc == nil {
+	if pb == nil {
 		logger.Info("Block delivery for channel", chainID, "was stopped before block provider started")
 		return
 	}
-	dc.bp.DeliverBlocks()
+	pb.DeliverBlocks()
 	finalizer()
 }
 
@@ -257,9 +184,9 @@ func (d *deliverServiceImpl) StopDeliverForChannel(chainID string) error {
 		logger.Errorf(errMsg)
 		return errors.New(errMsg)
 	}
-	if dc, exist := d.deliverClients[chainID]; exist {
-		dc.bp.Stop()
-		delete(d.deliverClients, chainID)
+	if client, exist := d.blockProviders[chainID]; exist {
+		client.Stop()
+		delete(d.blockProviders, chainID)
 		logger.Debug("This peer will stop pass blocks from orderer service to other peers")
 	} else {
 		errMsg := fmt.Sprintf("Delivery service - no block provider for %s found, can't stop delivery", chainID)
@@ -276,8 +203,8 @@ func (d *deliverServiceImpl) Stop() {
 	// Marking flag to indicate the shutdown of the delivery service
 	d.stopping = true
 
-	for _, dc := range d.deliverClients {
-		dc.bp.Stop()
+	for _, client := range d.blockProviders {
+		client.Stop()
 	}
 }
 
@@ -292,24 +219,21 @@ func (d *deliverServiceImpl) newClient(chainID string, ledgerInfoProvider blocks
 		return requester.RequestBlocks(ledgerInfoProvider)
 	}
 	backoffPolicy := func(attemptNum int, elapsedTime time.Duration) (time.Duration, bool) {
-		if elapsedTime >= reconnectTotalTimeThreshold {
-			if !d.conf.IsStaticLeader {
-				return 0, false
-			}
-			logger.Warning("peer is a static leader, ignoring peer.deliveryclient.reconnectTotalTimeThreshold")
+		if elapsedTime > reconnectTotalTimeThreshold {
+			return 0, false
 		}
 		sleepIncrement := float64(time.Millisecond * 500)
 		attempt := float64(attemptNum)
-		return time.Duration(math.Min(math.Pow(2, attempt)*sleepIncrement, float64(reconnectBackoffThreshold))), true
+		return time.Duration(math.Min(math.Pow(2, attempt)*sleepIncrement, reconnectBackoffThreshold)), true
 	}
-	connProd := comm.NewConnectionProducer(d.conf.ConnFactory(chainID, d.connConfig.OrdererEndpointOverrides), d.connConfig.toEndpointCriteria())
+	connProd := comm.NewConnectionProducer(d.conf.ConnFactory(chainID), d.conf.Endpoints)
 	bClient := NewBroadcastClient(connProd, d.conf.ABCFactory, broadcastSetup, backoffPolicy)
 	requester.client = bClient
 	return bClient
 }
 
-func DefaultConnectionFactory(channelID string, endpointOverrides map[string]*comm.OrdererEndpoint) func(endpointCriteria comm.EndpointCriteria) (*grpc.ClientConn, error) {
-	return func(criteria comm.EndpointCriteria) (*grpc.ClientConn, error) {
+func DefaultConnectionFactory(channelID string) func(endpoint string) (*grpc.ClientConn, error) {
+	return func(endpoint string) (*grpc.ClientConn, error) {
 		dialOpts := []grpc.DialOption{grpc.WithBlock()}
 		// set max send/recv msg sizes
 		dialOpts = append(dialOpts, grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(comm.MaxRecvMsgSize),
@@ -327,7 +251,7 @@ func DefaultConnectionFactory(channelID string, endpointOverrides map[string]*co
 		dialOpts = append(dialOpts, comm.ClientKeepaliveOptions(kaOpts)...)
 
 		if viper.GetBool("peer.tls.enabled") {
-			creds, err := comm.GetCredentialSupport().GetDeliverServiceCredentials(channelID, staticRootsEnabled(), criteria.Organizations, endpointOverrides)
+			creds, err := comm.GetCredentialSupport().GetDeliverServiceCredentials(channelID)
 			if err != nil {
 				return nil, fmt.Errorf("failed obtaining credentials for channel %s: %v", channelID, err)
 			}
@@ -337,7 +261,7 @@ func DefaultConnectionFactory(channelID string, endpointOverrides map[string]*co
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), getConnectionTimeout())
 		defer cancel()
-		return grpc.DialContext(ctx, criteria.Endpoint, dialOpts...)
+		return grpc.DialContext(ctx, endpoint, dialOpts...)
 	}
 }
 

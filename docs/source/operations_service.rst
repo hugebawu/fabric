@@ -10,7 +10,6 @@ The API exposes the following capabilities:
 - Log level management
 - Health checks
 - Prometheus target for operational metrics (when configured)
-- Version information
 
 Configuring the Operations Service
 ----------------------------------
@@ -48,9 +47,7 @@ section of ``core.yaml``:
       key:
         file: tls/server.key
 
-      # most operations service endpoints require client authentication when TLS
-      # is enabled. clientAuthRequired requires client certificate authentication
-      # at the TLS layer to access all resources.
+      # require client certificate authentication to access all resources
       clientAuthRequired: false
 
       # paths to PEM encoded ca certificates to trust for client authentication
@@ -64,11 +61,8 @@ can be omitted.
 The ``tls`` section is used to indicate whether or not TLS is enabled for the
 operations service, the location of the service's certificate and private key,
 and the locations of certificate authority root certificates that should be
-trusted for client authentication. When ``enabled`` is true, most of the operations
-service endpoints require client authentication, therefore
-``clientRootCAs.files`` must be set. When ``clientAuthRequired`` is ``true``,
-the TLS layer will require clients to provide a certificate for authentication
-on every request. See Operations Security section below for more details.
+trusted for client authentication. When ``clientAuthRequired`` is ``true``,
+clients will be required to provide a certificate for authentication.
 
 Orderer
 ~~~~~~~
@@ -94,11 +88,9 @@ section of ``orderer.yaml``:
       Certificate: tls/server.crt
 
       # Paths to PEM encoded ca certificates to trust for client authentication
-      ClientRootCAs: []
+      RootCAs: []
 
-      # Most operations service endpoints require client authentication when TLS
-      # is enabled. ClientAuthRequired requires client certificate authentication
-      # at the TLS layer to access all resources.
+      # Require client certificate authentication to access all endpoints
       ClientAuthRequired: false
 
 The ``ListenAddress`` key defines the host and port that the operations server
@@ -108,11 +100,8 @@ can be omitted.
 The ``TLS`` section is used to indicate whether or not TLS is enabled for the
 operations service, the location of the service's certificate and private key,
 and the locations of certificate authority root certificates that should be
-trusted for client authentication.   When ``Enabled`` is true, most of the operations
-service endpoints require client authentication, therefore
-``RootCAs`` must be set. When ``ClientAuthRequired`` is ``true``,
-the TLS layer will require clients to provide a certificate for authentication
-on every request. See Operations Security section below for more details.
+trusted for client authentication. When ``ClientAuthRequired`` is ``true``,
+clients will be required to provide a certificate for authentication.
 
 Operations Security
 ~~~~~~~~~~~~~~~~~~~
@@ -122,14 +111,16 @@ to the Fabric network, it does not use the Membership Services Provider for
 access control. Instead, the operations service relies entirely on mutual TLS with
 client certificate authentication.
 
+It is highly recommended to enable mutual TLS by setting the value of ``clientAuthRequired``
+to ``true`` in production environments. With this configuration, clients are
+required to provide a valid certificate for authentication. If the client does
+not provide a certificate or the service cannot verify the client’s certificate,
+the request is rejected. Note that if ``clientAuthRequired`` is set to ``false``,
+clients do not need to provide a certificate; if they do, however, and the service
+cannot verify the certificate, then the request will be rejected.
+
 When TLS is disabled, authorization is bypassed and any client that can
 connect to the operations endpoint will be able to use the API.
-
-When TLS is enabled, a valid client certificate must be provided in order to
-access all resources unless explicitly noted otherwise below.
-
-When clientAuthRequired is also enabled, the TLS layer will require
-a valid client certificate regardless of the resource being accessed.
 
 Log Level Management
 ~~~~~~~~~~~~~~~~~~~~
@@ -203,7 +194,7 @@ In the current version, the only health check that is registered is for Docker.
 Future versions will be enhanced to add additional health checks.
 
 When TLS is enabled, a valid client certificate is not required to use this
-service unless ``clientAuthRequired`` is set to ``true``.
+service unless ``requireClientAuth`` is set to ``true``.
 
 Metrics
 -------
@@ -304,13 +295,6 @@ metrics.
 
 For a look at the different metrics that are generated, check out
 :doc:`metrics_reference`.
-
-Version
--------
-
-The orderer and peer both expose a ``/version`` endpoint. This endpoint
-serves a JSON document containing the orderer or peer version and the commit
-SHA on which the release was cut.
 
 .. Licensed under Creative Commons Attribution 4.0 International License
    https://creativecommons.org/licenses/by/4.0/

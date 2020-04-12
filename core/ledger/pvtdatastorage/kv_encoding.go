@@ -73,12 +73,9 @@ func encodeExpiryValue(expiryData *ExpiryData) ([]byte, error) {
 	return proto.Marshal(expiryData)
 }
 
-func decodeExpiryKey(expiryKeyBytes []byte) (*expiryKey, error) {
-	height, _, err := version.NewHeightFromBytes(expiryKeyBytes[1:])
-	if err != nil {
-		return nil, err
-	}
-	return &expiryKey{expiringBlk: height.BlockNum, committingBlk: height.TxNum}, nil
+func decodeExpiryKey(expiryKeyBytes []byte) *expiryKey {
+	height, _ := version.NewHeightFromBytes(expiryKeyBytes[1:])
+	return &expiryKey{expiringBlk: height.BlockNum, committingBlk: height.TxNum}
 }
 
 func decodeExpiryValue(expiryValueBytes []byte) (*ExpiryData, error) {
@@ -87,18 +84,15 @@ func decodeExpiryValue(expiryValueBytes []byte) (*ExpiryData, error) {
 	return expiryData, err
 }
 
-func decodeDatakey(datakeyBytes []byte) (*dataKey, error) {
-	v, n, err := version.NewHeightFromBytes(datakeyBytes[1:])
-	if err != nil {
-		return nil, err
-	}
+func decodeDatakey(datakeyBytes []byte) *dataKey {
+	v, n := version.NewHeightFromBytes(datakeyBytes[1:])
 	blkNum := v.BlockNum
 	tranNum := v.TxNum
 	remainingBytes := datakeyBytes[n+1:]
 	nilByteIndex := bytes.IndexByte(remainingBytes, nilByte)
 	ns := string(remainingBytes[:nilByteIndex])
 	coll := string(remainingBytes[nilByteIndex+1:])
-	return &dataKey{nsCollBlk{ns, coll, blkNum}, tranNum}, nil
+	return &dataKey{nsCollBlk{ns, coll, blkNum}, tranNum}
 }
 
 func decodeDataValue(datavalueBytes []byte) (*rwset.CollectionPvtReadWriteSet, error) {

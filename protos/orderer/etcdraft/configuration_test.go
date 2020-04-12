@@ -17,7 +17,7 @@ import (
 )
 
 func TestMarshal(t *testing.T) {
-	md := &etcdraft.ConfigMetadata{
+	md := &etcdraft.Metadata{
 		Consenters: []*etcdraft.Consenter{
 			{
 				Host:          "node-1.example.com",
@@ -42,10 +42,7 @@ func TestMarshal(t *testing.T) {
 	packed, err := etcdraft.Marshal(md)
 	require.Nil(t, err, "marshalling should succeed")
 
-	packed, err = etcdraft.Marshal(md)
-	require.Nil(t, err, "marshalling should succeed a second time because we did not mutate ourselves")
-
-	unpacked := &etcdraft.ConfigMetadata{}
+	unpacked := &etcdraft.Metadata{}
 	require.Nil(t, proto.Unmarshal(packed, unpacked), "unmarshalling should succeed")
 
 	var outputCerts, inputCerts [3][]byte

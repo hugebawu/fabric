@@ -55,7 +55,7 @@ type CollectionAccessPolicy interface {
 	IsMemberOnlyRead() bool
 }
 
-// CollectionPersistenceConfigs encapsulates configurations related to persistence of a collection
+// CollectionPersistenceConfigs encapsulates configurations related to persistece of a collection
 type CollectionPersistenceConfigs interface {
 	// BlockToLive returns the number of blocks after which the collection data expires.
 	// For instance if the value is set to 10, a key last modified by block number 100
@@ -84,14 +84,14 @@ type Filter func(common.SignedData) bool
 // (3) we would need a cache in collection store to avoid repeated crypto operation.
 //     This would be simple to implement when we introduce IsAMemberOf() APIs.
 type CollectionStore interface {
-	// RetrieveCollection retrieves the collection in the following way:
+	// GetCollection retrieves the collection in the following way:
 	// If the TxID exists in the ledger, the collection that is returned has the
 	// latest configuration that was committed into the ledger before this txID
 	// was committed.
 	// Else - it's the latest configuration for the collection.
 	RetrieveCollection(common.CollectionCriteria) (Collection, error)
 
-	// RetrieveCollectionAccessPolicy retrieves a collection's access policy
+	// GetCollectionAccessPolicy retrieves a collection's access policy
 	RetrieveCollectionAccessPolicy(common.CollectionCriteria) (CollectionAccessPolicy, error)
 
 	// RetrieveCollectionConfigPackage retrieves the whole configuration package
@@ -114,13 +114,13 @@ type CollectionFilter interface {
 }
 
 const (
-	// Collection-specific constants
+	// Collecion-specific constants
 
 	// CollectionSeparator is the separator used to build the KVS
 	// key storing the collections of a chaincode; note that we are
 	// using as separator a character which is illegal for either the
 	// name or the version of a chaincode so there cannot be any
-	// collisions when choosing the name
+	// collisions when chosing the name
 	collectionSeparator = "~"
 	// collectionSuffix is the suffix of the KVS key storing the
 	// collections of a chaincode

@@ -135,9 +135,11 @@ var _ = Describe("Server", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
 			defer cancel()
 
+			startTime := time.Now()
 			resp, err := echoServiceClient.Echo(ctx, &testpb.Message{Message: "hi"})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(resp).To(Equal(&testpb.Message{Message: "hi", Sequence: 1}))
+			endTime := time.Now()
 
 			var logMessages []string
 			for _, entry := range observed.AllUntimed() {
@@ -158,12 +160,12 @@ var _ = Describe("Server", func() {
 				switch entry.LoggerName {
 				case "test-logger":
 					Expect(entry.Level).To(Equal(zapcore.InfoLevel))
-					Expect(entry.Context).To(HaveLen(8))
-					Expect(keyNames).To(HaveLen(8))
+					Expect(entry.Context).To(HaveLen(9))
+					Expect(keyNames).To(HaveLen(9))
 				case "test-logger.payload":
 					Expect(entry.Level).To(Equal(zapcore.DebugLevel - 1))
-					Expect(entry.Context).To(HaveLen(6))
-					Expect(keyNames).To(HaveLen(6))
+					Expect(entry.Context).To(HaveLen(7))
+					Expect(keyNames).To(HaveLen(7))
 				default:
 					Fail("unexpected logger name: " + entry.LoggerName)
 				}
@@ -177,6 +179,10 @@ var _ = Describe("Server", func() {
 					case "grpc.call_duration":
 						Expect(field.Type).To(Equal(zapcore.DurationType))
 						Expect(field.Integer).NotTo(BeZero())
+					case "grpc.start_time":
+						Expect(field.Type).To(Equal(zapcore.TimeType))
+						Expect(field.Integer).NotTo(BeZero())
+						Expect(time.Unix(0, field.Integer)).To(BeTemporally("~", startTime, endTime.Sub(startTime)))
 					case "grpc.service":
 						Expect(field.Type).To(Equal(zapcore.StringType))
 						Expect(field.String).To(Equal("testpb.EchoService"))
@@ -223,6 +229,7 @@ var _ = Describe("Server", func() {
 				keyNames = append(keyNames, field.Key)
 			}
 			Expect(keyNames).To(ConsistOf(
+				"grpc.start_time",
 				"grpc.service",
 				"grpc.method",
 				"grpc.request_deadline",
@@ -360,6 +367,7 @@ var _ = Describe("Server", func() {
 			streamClient, err := echoServiceClient.EchoStream(ctx)
 			Expect(err).NotTo(HaveOccurred())
 
+			startTime := time.Now()
 			err = streamClient.Send(&testpb.Message{Message: "hello"})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -369,6 +377,7 @@ var _ = Describe("Server", func() {
 
 			err = streamClient.CloseSend()
 			Expect(err).NotTo(HaveOccurred())
+			endTime := time.Now()
 
 			Eventually(observed.AllUntimed).Should(HaveLen(3))
 			var logMessages []string
@@ -390,12 +399,12 @@ var _ = Describe("Server", func() {
 				switch entry.LoggerName {
 				case "test-logger":
 					Expect(entry.Level).To(Equal(zapcore.InfoLevel))
-					Expect(entry.Context).To(HaveLen(8))
-					Expect(keyNames).To(HaveLen(8))
+					Expect(entry.Context).To(HaveLen(9))
+					Expect(keyNames).To(HaveLen(9))
 				case "test-logger.payload":
 					Expect(entry.Level).To(Equal(zapcore.DebugLevel - 1))
-					Expect(entry.Context).To(HaveLen(6))
-					Expect(keyNames).To(HaveLen(6))
+					Expect(entry.Context).To(HaveLen(7))
+					Expect(keyNames).To(HaveLen(7))
 				default:
 					Fail("unexpected logger name: " + entry.LoggerName)
 				}
@@ -409,6 +418,10 @@ var _ = Describe("Server", func() {
 					case "grpc.call_duration":
 						Expect(field.Type).To(Equal(zapcore.DurationType))
 						Expect(field.Integer).NotTo(BeZero())
+					case "grpc.start_time":
+						Expect(field.Type).To(Equal(zapcore.TimeType))
+						Expect(field.Integer).NotTo(BeZero())
+						Expect(time.Unix(0, field.Integer)).To(BeTemporally("~", startTime, endTime.Sub(startTime)))
 					case "grpc.service":
 						Expect(field.Type).To(Equal(zapcore.StringType))
 						Expect(field.String).To(Equal("testpb.EchoService"))
@@ -465,6 +478,7 @@ var _ = Describe("Server", func() {
 				keyNames = append(keyNames, field.Key)
 			}
 			Expect(keyNames).To(ConsistOf(
+				"grpc.start_time",
 				"grpc.service",
 				"grpc.method",
 				"grpc.request_deadline",

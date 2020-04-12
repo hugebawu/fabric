@@ -16,11 +16,19 @@ import (
 	util2 "github.com/hyperledger/fabric/common/util"
 	"github.com/hyperledger/fabric/core/committer"
 	"github.com/hyperledger/fabric/core/ledger"
-	"github.com/hyperledger/fabric/gossip/metrics"
 	privdatacommon "github.com/hyperledger/fabric/gossip/privdata/common"
 	"github.com/hyperledger/fabric/protos/common"
 	gossip2 "github.com/hyperledger/fabric/protos/gossip"
 	"github.com/pkg/errors"
+	"github.com/spf13/viper"
+)
+
+const (
+	reconcileSleepIntervalConfigKey = "peer.gossip.pvtData.reconcileSleepInterval"
+	reconcileSleepIntervalDefault   = time.Minute * 1
+	reconcileBatchSizeConfigKey     = "peer.gossip.pvtData.reconcileBatchSize"
+	reconcileBatchSizeDefault       = 10
+	reconciliationEnabledConfigKey  = "peer.gossip.pvtData.reconciliationEnabled"
 )
 
 // ReconciliationFetcher interface which defines API to fetch
@@ -43,9 +51,7 @@ type PvtDataReconciler interface {
 }
 
 type Reconciler struct {
-	channel string
-	metrics *metrics.PrivdataMetrics
-	config  *ReconcilerConfig
+	config *ReconcilerConfig
 	ReconciliationFetcher
 	committer.Committer
 	stopChan  chan struct{}
@@ -69,18 +75,31 @@ func (*NoOpReconciler) Stop() {
 
 // ReconcilerConfig holds config flags that are read from core.yaml
 type ReconcilerConfig struct {
-	SleepInterval time.Duration
-	BatchSize     int
+	sleepInterval time.Duration
+	batchSize     int
 	IsEnabled     bool
 }
 
+// this func reads reconciler configuration values from core.yaml and returns ReconcilerConfig
+func GetReconcilerConfig() *ReconcilerConfig {
+	reconcileSleepInterval := viper.GetDuration(reconcileSleepIntervalConfigKey)
+	if reconcileSleepInterval == 0 {
+		logger.Warning("Configuration key", reconcileSleepIntervalConfigKey, "isn't set, defaulting to", reconcileSleepIntervalDefault)
+		reconcileSleepInterval = reconcileSleepIntervalDefault
+	}
+	reconcileBatchSize := viper.GetInt(reconcileBatchSizeConfigKey)
+	if reconcileBatchSize == 0 {
+		logger.Warning("Configuration key", reconcileBatchSizeConfigKey, "isn't set, defaulting to", reconcileBatchSizeDefault)
+		reconcileBatchSize = reconcileBatchSizeDefault
+	}
+	isEnabled := viper.GetBool(reconciliationEnabledConfigKey)
+	return &ReconcilerConfig{sleepInterval: reconcileSleepInterval, batchSize: reconcileBatchSize, IsEnabled: isEnabled}
+}
+
 // NewReconciler creates a new instance of reconciler
-func NewReconciler(channel string, metrics *metrics.PrivdataMetrics, c committer.Committer,
-	fetcher ReconciliationFetcher, config *ReconcilerConfig) *Reconciler {
+func NewReconciler(c committer.Committer, fetcher ReconciliationFetcher, config *ReconcilerConfig) *Reconciler {
 	logger.Debug("Private data reconciliation is enabled")
 	return &Reconciler{
-		channel:               channel,
-		metrics:               metrics,
 		config:                config,
 		Committer:             c,
 		ReconciliationFetcher: fetcher,
@@ -105,7 +124,7 @@ func (r *Reconciler) run() {
 		select {
 		case <-r.stopChan:
 			return
-		case <-time.After(r.config.SleepInterval):
+		case <-time.After(r.config.sleepInterval):
 			logger.Debug("Start reconcile missing private info")
 			if err := r.reconcile(); err != nil {
 				logger.Error("Failed to reconcile missing private info, error: ", err.Error())
@@ -128,10 +147,8 @@ func (r *Reconciler) reconcile() error {
 	}
 	totalReconciled, minBlock, maxBlock := 0, uint64(math.MaxUint64), uint64(0)
 
-	defer r.reportReconciliationDuration(time.Now())
-
 	for {
-		missingPvtDataInfo, err := missingPvtDataTracker.GetMissingPvtDataInfoForMostRecentBlocks(r.config.BatchSize)
+		missingPvtDataInfo, err := missingPvtDataTracker.GetMissingPvtDataInfoForMostRecentBlocks(r.config.batchSize)
 		if err != nil {
 			logger.Error("reconciliation error when trying to get missing pvt data info recent blocks:", err)
 			return err
@@ -174,10 +191,6 @@ func (r *Reconciler) reconcile() error {
 		}
 		totalReconciled += len(fetchedData.AvailableElements)
 	}
-}
-
-func (r *Reconciler) reportReconciliationDuration(startTime time.Time) {
-	r.metrics.ReconciliationDuration.With("channel", r.channel).Observe(time.Since(startTime).Seconds())
 }
 
 type collectionConfigKey struct {

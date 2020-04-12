@@ -30,66 +30,63 @@ const RootGroupKey = "Channel"
 // entirety, with new backing memory.
 type Bundle struct {
 	policyManager   policies.Manager
+	mspManager      msp.MSPManager
 	channelConfig   *ChannelConfig
 	configtxManager configtx.Validator
 }
 
-// PolicyManager returns the policy manager constructed for this config.
+// PolicyManager returns the policy manager constructed for this config
 func (b *Bundle) PolicyManager() policies.Manager {
 	return b.policyManager
 }
 
-// MSPManager returns the MSP manager constructed for this config.
+// MSPManager returns the MSP manager constructed for this config
 func (b *Bundle) MSPManager() msp.MSPManager {
 	return b.channelConfig.MSPManager()
 }
 
-// ChannelConfig returns the config.Channel for the chain.
+// ChannelConfig returns the config.Channel for the chain
 func (b *Bundle) ChannelConfig() Channel {
 	return b.channelConfig
 }
 
 // OrdererConfig returns the config.Orderer for the channel
-// and whether the Orderer config exists.
+// and whether the Orderer config exists
 func (b *Bundle) OrdererConfig() (Orderer, bool) {
 	result := b.channelConfig.OrdererConfig()
 	return result, result != nil
 }
 
-// ConsortiumsConfig returns the config.Consortiums for the channel
-// and whether the consortiums config exists.
+// ConsortiumsConfig() returns the config.Consortiums for the channel
+// and whether the consortiums config exists
 func (b *Bundle) ConsortiumsConfig() (Consortiums, bool) {
 	result := b.channelConfig.ConsortiumsConfig()
 	return result, result != nil
 }
 
 // ApplicationConfig returns the configtxapplication.SharedConfig for the channel
-// and whether the Application config exists.
+// and whether the Application config exists
 func (b *Bundle) ApplicationConfig() (Application, bool) {
 	result := b.channelConfig.ApplicationConfig()
 	return result, result != nil
 }
 
-// ConfigtxValidator returns the configtx.Validator for the channel.
+// ConfigtxValidator returns the configtx.Validator for the channel
 func (b *Bundle) ConfigtxValidator() configtx.Validator {
 	return b.configtxManager
 }
 
 // ValidateNew checks if a new bundle's contained configuration is valid to be derived from the current bundle.
-// This allows checks of the nature "Make sure that the consensus type did not change".
+// This allows checks of the nature "Make sure that the consensus type did not change." which is otherwise
 func (b *Bundle) ValidateNew(nb Resources) error {
 	if oc, ok := b.OrdererConfig(); ok {
 		noc, ok := nb.OrdererConfig()
 		if !ok {
-			return errors.New("current config has orderer section, but new config does not")
+			return errors.New("Current config has orderer section, but new config does not")
 		}
 
-		// Prevent consensus-type migration when channel capabilities ConsensusTypeMigration is disabled
-		if !b.channelConfig.Capabilities().ConsensusTypeMigration() {
-			if oc.ConsensusType() != noc.ConsensusType() {
-				return errors.Errorf("attempted to change consensus type from %s to %s",
-					oc.ConsensusType(), noc.ConsensusType())
-			}
+		if oc.ConsensusType() != noc.ConsensusType() {
+			return errors.Errorf("Attempted to change consensus type from %s to %s", oc.ConsensusType(), noc.ConsensusType())
 		}
 
 		for orgName, org := range oc.Organizations() {
@@ -99,7 +96,7 @@ func (b *Bundle) ValidateNew(nb Resources) error {
 			}
 			mspID := org.MSPID()
 			if mspID != norg.MSPID() {
-				return errors.Errorf("orderer org %s attempted to change MSP ID from %s to %s", orgName, mspID, norg.MSPID())
+				return errors.Errorf("Orderer org %s attempted to change MSP ID from %s to %s", orgName, mspID, norg.MSPID())
 			}
 		}
 	}
@@ -107,7 +104,7 @@ func (b *Bundle) ValidateNew(nb Resources) error {
 	if ac, ok := b.ApplicationConfig(); ok {
 		nac, ok := nb.ApplicationConfig()
 		if !ok {
-			return errors.New("current config has application section, but new config does not")
+			return errors.New("Current config has application section, but new config does not")
 		}
 
 		for orgName, org := range ac.Organizations() {
@@ -117,7 +114,7 @@ func (b *Bundle) ValidateNew(nb Resources) error {
 			}
 			mspID := org.MSPID()
 			if mspID != norg.MSPID() {
-				return errors.Errorf("application org %s attempted to change MSP ID from %s to %s", orgName, mspID, norg.MSPID())
+				return errors.Errorf("Application org %s attempted to change MSP ID from %s to %s", orgName, mspID, norg.MSPID())
 			}
 		}
 	}
@@ -125,7 +122,7 @@ func (b *Bundle) ValidateNew(nb Resources) error {
 	if cc, ok := b.ConsortiumsConfig(); ok {
 		ncc, ok := nb.ConsortiumsConfig()
 		if !ok {
-			return errors.Errorf("current config has consortiums section, but new config does not")
+			return errors.Errorf("Current config has consortiums section, but new config does not")
 		}
 
 		for consortiumName, consortium := range cc.Consortiums() {
@@ -141,12 +138,10 @@ func (b *Bundle) ValidateNew(nb Resources) error {
 				}
 				mspID := org.MSPID()
 				if mspID != norg.MSPID() {
-					return errors.Errorf("consortium %s org %s attempted to change MSP ID from %s to %s", consortiumName, orgName, mspID, norg.MSPID())
+					return errors.Errorf("Consortium %s org %s attempted to change MSP ID from %s to %s", consortiumName, orgName, mspID, norg.MSPID())
 				}
 			}
 		}
-	} else if _, okNew := nb.ConsortiumsConfig(); okNew {
-		return errors.Errorf("current config has no consortiums section, but new config does")
 	}
 
 	return nil

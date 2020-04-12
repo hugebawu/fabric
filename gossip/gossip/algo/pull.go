@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hyperledger/fabric/gossip/util"
+	"github.com/spf13/viper"
 )
 
 /* PullEngine is an object that performs pull-based gossip, and maintains an internal state of items
@@ -33,10 +34,25 @@ import (
 */
 
 const (
-	DefDigestWaitTime   = 1000 * time.Millisecond
-	DefRequestWaitTime  = 1500 * time.Millisecond
-	DefResponseWaitTime = 2000 * time.Millisecond
+	defDigestWaitTime   = time.Duration(1000) * time.Millisecond
+	defRequestWaitTime  = time.Duration(1500) * time.Millisecond
+	defResponseWaitTime = time.Duration(2000) * time.Millisecond
 )
+
+// SetDigestWaitTime sets the digest wait time
+func SetDigestWaitTime(time time.Duration) {
+	viper.Set("peer.gossip.digestWaitTime", time)
+}
+
+// SetRequestWaitTime sets the request wait time
+func SetRequestWaitTime(time time.Duration) {
+	viper.Set("peer.gossip.requestWaitTime", time)
+}
+
+// SetResponseWaitTime sets the response wait time
+func SetResponseWaitTime(time time.Duration) {
+	viper.Set("peer.gossip.responseWaitTime", time)
+}
 
 // DigestFilter filters digests to be sent to a remote peer that
 // sent a hello or a request, based on its messages's context
@@ -89,17 +105,9 @@ type PullEngine struct {
 	responseWaitTime time.Duration
 }
 
-// PullEngineConfig is the configuration required to initialize a new pull engine
-type PullEngineConfig struct {
-	DigestWaitTime   time.Duration
-	RequestWaitTime  time.Duration
-	ResponseWaitTime time.Duration
-}
-
 // NewPullEngineWithFilter creates an instance of a PullEngine with a certain sleep time
 // between pull initiations, and uses the given filters when sending digests and responses
-func NewPullEngineWithFilter(participant PullAdapter, sleepTime time.Duration, df DigestFilter,
-	config PullEngineConfig) *PullEngine {
+func NewPullEngineWithFilter(participant PullAdapter, sleepTime time.Duration, df DigestFilter) *PullEngine {
 	engine := &PullEngine{
 		PullAdapter:        participant,
 		stopFlag:           int32(0),
@@ -112,9 +120,9 @@ func NewPullEngineWithFilter(participant PullAdapter, sleepTime time.Duration, d
 		incomingNONCES:     util.NewSet(),
 		outgoingNONCES:     util.NewSet(),
 		digFilter:          df,
-		digestWaitTime:     config.DigestWaitTime,
-		requestWaitTime:    config.RequestWaitTime,
-		responseWaitTime:   config.ResponseWaitTime,
+		digestWaitTime:     util.GetDurationOrDefault("peer.gossip.digestWaitTime", defDigestWaitTime),
+		requestWaitTime:    util.GetDurationOrDefault("peer.gossip.requestWaitTime", defRequestWaitTime),
+		responseWaitTime:   util.GetDurationOrDefault("peer.gossip.responseWaitTime", defResponseWaitTime),
 	}
 
 	go func() {
@@ -132,13 +140,13 @@ func NewPullEngineWithFilter(participant PullAdapter, sleepTime time.Duration, d
 
 // NewPullEngine creates an instance of a PullEngine with a certain sleep time
 // between pull initiations
-func NewPullEngine(participant PullAdapter, sleepTime time.Duration, config PullEngineConfig) *PullEngine {
+func NewPullEngine(participant PullAdapter, sleepTime time.Duration) *PullEngine {
 	acceptAllFilter := func(_ interface{}) func(string) bool {
 		return func(_ string) bool {
 			return true
 		}
 	}
-	return NewPullEngineWithFilter(participant, sleepTime, acceptAllFilter, config)
+	return NewPullEngineWithFilter(participant, sleepTime, acceptAllFilter)
 }
 
 func (engine *PullEngine) toDie() bool {

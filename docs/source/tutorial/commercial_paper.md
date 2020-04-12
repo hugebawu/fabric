@@ -401,7 +401,7 @@ environment. Note the following key program lines:
   This statement brings into scope two key Hyperledger Fabric classes that will
   be used extensively by the smart contract  -- `Contract` and `Context`. You
   can learn more about these classes in the
-  [`fabric-shim` JSDOCS](https://hyperledger.github.io/fabric-chaincode-node/).
+  [`fabric-shim` JSDOCS](https://fabric-shim.github.io/).
 
 
 * `class CommercialPaperContract extends Contract {`
@@ -438,7 +438,7 @@ environment. Note the following key program lines:
   examine the `buy` and `redeem` methods to see how they use this class.
 
 
-* `return paper;`
+* `return paper.toBuffer();`
 
   This statement returns a binary buffer as response from the `issue`
   transaction for processing by the caller of the smart contract.
@@ -471,9 +471,9 @@ file system within the target peer's docker container. Once the smart contract
 is installed on the peer and instantiated on a channel,
 `papercontract` can be invoked by applications, and interact with the ledger
 database via the
-[putState()](https://hyperledger.github.io/fabric-chaincode-node/release-1.4/api/fabric-shim.ChaincodeStub.html#putState__anchor)
+[putState()](https://fabric-shim.github.io/release-1.3/fabric-shim.ChaincodeStub.html#putState__anchor)
 and
-[getState()](https://hyperledger.github.io/fabric-chaincode-node/release-1.4/api/fabric-shim.ChaincodeStub.html#getState__anchor)
+[getState()](https://fabric-shim.github.io/release-1.3/fabric-shim.ChaincodeStub.html#getState__anchor)
 Fabric APIs. Examine how these APIs are used by `StateList` class within
 `ledger-api\statelist.js`.
 
@@ -662,11 +662,12 @@ Note the following key program lines in `issue.js`:
   `papercontract` was previously instantiated.
 
 
-*  `const contract = await network.getContract('papercontract');`
+*  `const contract = await network.getContract('papercontract', 'org.papernet.comm...');`
 
-  This statement gives the application access to the `papercontract` chaincode.
-  Once an application has issued getContract, it can submit to any smart contract
-  transaction implemented within the chaincode.
+  This statement gives the application addressability to smart contract defined
+  by the namespace `org.papernet.commercialpaper` within `papercontract`. Once
+  an application has issued getContract, it can submit any transaction
+  implemented within it.
 
 
 * `const issueResponse = await contract.submitTransaction('issue', 'MagnetoCorp', '00001'...);`
@@ -714,8 +715,8 @@ download and their exact versions:
 
 ```json
   "dependencies": {
-    "fabric-network": "^1.4.0",
-    "fabric-client": "^1.4.0",
+    "fabric-network": "^1.4.0-beta",
+    "fabric-client": "^1.4.0-beta",
     "js-yaml": "^3.12.0"
   },
 ```

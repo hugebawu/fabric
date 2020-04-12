@@ -20,10 +20,8 @@ import (
 
 	"github.com/Shopify/sarama"
 	version "github.com/hashicorp/go-version"
-	"github.com/hyperledger/fabric/bccsp/factory"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/mitchellh/mapstructure"
-	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 )
 
@@ -31,31 +29,10 @@ var logger = flogging.MustGetLogger("viperutil")
 
 type viperGetter func(key string) interface{}
 
-func getKeysRecursively(base string, getKey viperGetter, nodeKeys map[string]interface{}, oType reflect.Type) map[string]interface{} {
-	subTypes := map[string]reflect.Type{}
-
-	if oType != nil && oType.Kind() == reflect.Struct {
-	outer:
-		for i := 0; i < oType.NumField(); i++ {
-			fieldName := oType.Field(i).Name
-			fieldType := oType.Field(i).Type
-
-			for key := range nodeKeys {
-				if strings.EqualFold(fieldName, key) {
-					subTypes[key] = fieldType
-					continue outer
-				}
-			}
-
-			subTypes[fieldName] = fieldType
-			nodeKeys[fieldName] = nil
-		}
-	}
-
+func getKeysRecursively(base string, getKey viperGetter, nodeKeys map[string]interface{}) map[string]interface{} {
 	result := make(map[string]interface{})
 	for key := range nodeKeys {
 		fqKey := base + key
-
 		val := getKey(fqKey)
 		if m, ok := val.(map[interface{}]interface{}); ok {
 			logger.Debugf("Found map[interface{}]interface{} value for %s", fqKey)
@@ -67,10 +44,10 @@ func getKeysRecursively(base string, getKey viperGetter, nodeKeys map[string]int
 				}
 				tmp[cik] = iv
 			}
-			result[key] = getKeysRecursively(fqKey+".", getKey, tmp, subTypes[key])
+			result[key] = getKeysRecursively(fqKey+".", getKey, tmp)
 		} else if m, ok := val.(map[string]interface{}); ok {
 			logger.Debugf("Found map[string]interface{} value for %s", fqKey)
-			result[key] = getKeysRecursively(fqKey+".", getKey, m, subTypes[key])
+			result[key] = getKeysRecursively(fqKey+".", getKey, m)
 		} else if m, ok := unmarshalJSON(val); ok {
 			logger.Debugf("Found real value for %s setting to map[string]string %v", fqKey, m)
 			result[key] = m
@@ -306,38 +283,14 @@ func kafkaVersionDecodeHook() mapstructure.DecodeHookFunc {
 	}
 }
 
-func bccspHook(f reflect.Type, t reflect.Type, data interface{}) (interface{}, error) {
-	if t != reflect.TypeOf(&factory.FactoryOpts{}) {
-		return data, nil
-	}
-
-	config := factory.GetDefaultOpts()
-
-	err := mapstructure.Decode(data, config)
-	if err != nil {
-		return nil, errors.Wrap(err, "could not decode bcssp type")
-	}
-
-	return config, nil
-}
-
 // EnhancedExactUnmarshal is intended to unmarshal a config file into a structure
 // producing error when extraneous variables are introduced and supporting
 // the time.Duration type
 func EnhancedExactUnmarshal(v *viper.Viper, output interface{}) error {
-	oType := reflect.TypeOf(output)
-	if oType.Kind() != reflect.Ptr {
-		return errors.Errorf("supplied output argument must be a pointer to a struct but is not pointer")
-	}
-	eType := oType.Elem()
-	if eType.Kind() != reflect.Struct {
-		return errors.Errorf("supplied output argument must be a pointer to a struct, but it is pointer to something else")
-	}
-
+	// AllKeys doesn't actually return all keys, it only returns the base ones
 	baseKeys := v.AllSettings()
-
 	getterWithClass := func(key string) interface{} { return v.Get(key) } // hide receiver
-	leafKeys := getKeysRecursively("", getterWithClass, baseKeys, eType)
+	leafKeys := getKeysRecursively("", getterWithClass, baseKeys)
 
 	logger.Debugf("%+v", leafKeys)
 	config := &mapstructure.DecoderConfig{
@@ -346,7 +299,6 @@ func EnhancedExactUnmarshal(v *viper.Viper, output interface{}) error {
 		Result:           output,
 		WeaklyTypedInput: true,
 		DecodeHook: mapstructure.ComposeDecodeHookFunc(
-			bccspHook,
 			customDecodeHook(),
 			byteSizeDecodeHook(),
 			stringFromFileDecodeHook(),
@@ -366,7 +318,7 @@ func EnhancedExactUnmarshal(v *viper.Viper, output interface{}) error {
 func EnhancedExactUnmarshalKey(baseKey string, output interface{}) error {
 	m := make(map[string]interface{})
 	m[baseKey] = nil
-	leafKeys := getKeysRecursively("", viper.Get, m, nil)
+	leafKeys := getKeysRecursively("", viper.Get, m)
 
 	logger.Debugf("%+v", leafKeys)
 

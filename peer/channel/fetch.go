@@ -30,7 +30,6 @@ func fetchCmd(cf *ChannelCmdFactory) *cobra.Command {
 	}
 	flagList := []string{
 		"channelID",
-		"bestEffort",
 	}
 	attachFlags(fetchCmd, flagList)
 
@@ -80,7 +79,6 @@ func fetch(cmd *cobra.Command, args []string, cf *ChannelCmdFactory) error {
 			return err2
 		}
 		block, err = cf.DeliverClient.GetSpecifiedBlock(lc)
-		logger.Infof("Retrieving last config block: %d", lc)
 	default:
 		num, err2 := strconv.Atoi(args[0])
 		if err2 != nil {

@@ -1,6 +1,17 @@
 /*
-Copyright IBM Corp. All Rights Reserved.
-SPDX-License-Identifier: Apache-2.0
+Copyright IBM Corp. 2016 All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+		 http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
 
 package fsblkstorage
@@ -10,30 +21,12 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/ledger/testutil"
-	"github.com/hyperledger/fabric/protos/common"
-	"github.com/hyperledger/fabric/protos/utils"
+	putils "github.com/hyperledger/fabric/protos/utils"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestBlockSerialization(t *testing.T) {
 	block := testutil.ConstructTestBlock(t, 1, 10, 100)
-
-	// malformed Payload
-	block.Data.Data[1] = utils.MarshalOrPanic(&common.Envelope{
-		Payload: []byte("Malformed Payload"),
-	})
-
-	// empty TxID
-	block.Data.Data[2] = utils.MarshalOrPanic(&common.Envelope{
-		Payload: utils.MarshalOrPanic(&common.Payload{
-			Header: &common.Header{
-				ChannelHeader: utils.MarshalOrPanic(&common.ChannelHeader{
-					TxId: "",
-				}),
-			},
-		}),
-	})
-
 	bb, _, err := serializeBlock(block)
 	assert.NoError(t, err)
 	deserializedBlock, err := deserializeBlock(bb)
@@ -41,49 +34,16 @@ func TestBlockSerialization(t *testing.T) {
 	assert.Equal(t, block, deserializedBlock)
 }
 
-func TestSerializedBlockInfo(t *testing.T) {
-	c := &testutilTxIDComputator{
-		t:               t,
-		malformedTxNums: map[int]struct{}{},
-	}
-
-	t.Run("txID is present in all transaction", func(t *testing.T) {
-		block := testutil.ConstructTestBlock(t, 1, 10, 100)
-		testSerializedBlockInfo(t, block, c)
-	})
-
-	t.Run("txID is not present in one of the transactions", func(t *testing.T) {
-		block := testutil.ConstructTestBlock(t, 1, 10, 100)
-		// empty txid for txNum 2
-		block.Data.Data[1] = utils.MarshalOrPanic(&common.Envelope{
-			Payload: utils.MarshalOrPanic(&common.Payload{
-				Header: &common.Header{
-					ChannelHeader: utils.MarshalOrPanic(&common.ChannelHeader{
-						TxId: "",
-					}),
-					SignatureHeader: utils.MarshalOrPanic(&common.SignatureHeader{
-						Creator: []byte("fake user"),
-						Nonce:   []byte("fake nonce"),
-					}),
-				},
-			}),
-		})
-		testSerializedBlockInfo(t, block, c)
-	})
-
-	t.Run("malformed tx-envelop for one of the transactions", func(t *testing.T) {
-		block := testutil.ConstructTestBlock(t, 1, 10, 100)
-		// malformed Payload for
-		block.Data.Data[1] = utils.MarshalOrPanic(&common.Envelope{
-			Payload: []byte("Malformed Payload"),
-		})
-		c.reset()
-		c.malformedTxNums[1] = struct{}{}
-		testSerializedBlockInfo(t, block, c)
-	})
+func TestExtractTxid(t *testing.T) {
+	txEnv, txid, _ := testutil.ConstructTransaction(t, testutil.ConstructRandomBytes(t, 50), "", false)
+	txEnvBytes, _ := putils.GetBytesEnvelope(txEnv)
+	extractedTxid, err := extractTxID(txEnvBytes)
+	assert.NoError(t, err)
+	assert.Equal(t, txid, extractedTxid)
 }
 
-func testSerializedBlockInfo(t *testing.T, block *common.Block, c *testutilTxIDComputator) {
+func TestSerializedBlockInfo(t *testing.T) {
+	block := testutil.ConstructTestBlock(t, 1, 10, 100)
 	bb, info, err := serializeBlock(block)
 	assert.NoError(t, err)
 	infoFromBB, err := extractSerializedBlockInfo(bb)
@@ -91,7 +51,9 @@ func testSerializedBlockInfo(t *testing.T, block *common.Block, c *testutilTxIDC
 	assert.Equal(t, info, infoFromBB)
 	assert.Equal(t, len(block.Data.Data), len(info.txOffsets))
 	for txIndex, txEnvBytes := range block.Data.Data {
-		txid := c.computeExpectedTxID(txIndex, txEnvBytes)
+		txid, err := extractTxID(txEnvBytes)
+		assert.NoError(t, err)
+
 		indexInfo := info.txOffsets[txIndex]
 		indexTxID := indexInfo.txID
 		indexOffset := indexInfo.loc
@@ -102,23 +64,4 @@ func testSerializedBlockInfo(t *testing.T, block *common.Block, c *testutilTxIDC
 		txEnvBytesFromBB := b[num : num+int(length)]
 		assert.Equal(t, txEnvBytes, txEnvBytesFromBB)
 	}
-}
-
-type testutilTxIDComputator struct {
-	t               *testing.T
-	malformedTxNums map[int]struct{}
-}
-
-func (c *testutilTxIDComputator) computeExpectedTxID(txNum int, txEnvBytes []byte) string {
-	txid, err := utils.GetOrComputeTxIDFromEnvelope(txEnvBytes)
-	if _, ok := c.malformedTxNums[txNum]; ok {
-		assert.Error(c.t, err)
-	} else {
-		assert.NoError(c.t, err)
-	}
-	return txid
-}
-
-func (c *testutilTxIDComputator) reset() {
-	c.malformedTxNums = map[int]struct{}{}
 }

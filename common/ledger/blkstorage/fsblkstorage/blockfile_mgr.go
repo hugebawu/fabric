@@ -647,20 +647,20 @@ func (i *checkpointInfo) marshal() ([]byte, error) {
 	buffer := proto.NewBuffer([]byte{})
 	var err error
 	if err = buffer.EncodeVarint(uint64(i.latestFileChunkSuffixNum)); err != nil {
-		return nil, errors.Wrapf(err, "error encoding the latestFileChunkSuffixNum [%d]", i.latestFileChunkSuffixNum)
+		return nil, err
 	}
 	if err = buffer.EncodeVarint(uint64(i.latestFileChunksize)); err != nil {
-		return nil, errors.Wrapf(err, "error encoding the latestFileChunksize [%d]", i.latestFileChunksize)
+		return nil, err
 	}
 	if err = buffer.EncodeVarint(i.lastBlockNumber); err != nil {
-		return nil, errors.Wrapf(err, "error encoding the lastBlockNumber [%d]", i.lastBlockNumber)
+		return nil, err
 	}
 	var chainEmptyMarker uint64
 	if i.isChainEmpty {
 		chainEmptyMarker = 1
 	}
 	if err = buffer.EncodeVarint(chainEmptyMarker); err != nil {
-		return nil, errors.Wrapf(err, "error encoding chainEmptyMarker [%d]", chainEmptyMarker)
+		return nil, err
 	}
 	return buffer.Bytes(), nil
 }

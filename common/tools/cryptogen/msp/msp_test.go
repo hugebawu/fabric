@@ -32,10 +32,11 @@ const (
 
 var testDir = filepath.Join(os.TempDir(), "msp-test")
 
-func testGenerateLocalMSP(t *testing.T, nodeOUs bool) {
+func TestGenerateLocalMSP(t *testing.T) {
+
 	cleanup(testDir)
 
-	err := msp.GenerateLocalMSP(testDir, testName, nil, &ca.CA{}, &ca.CA{}, msp.PEER, nodeOUs)
+	err := msp.GenerateLocalMSP(testDir, testName, nil, &ca.CA{}, &ca.CA{}, msp.PEER, true)
 	assert.Error(t, err, "Empty CA should have failed")
 
 	caDir := filepath.Join(testDir, "ca")
@@ -64,22 +65,18 @@ func testGenerateLocalMSP(t *testing.T, nodeOUs bool) {
 	assert.Equal(t, testPostalCode, signCA.SignCert.Subject.PostalCode[0], "Failed to match postalCode")
 
 	// generate local MSP for nodeType=PEER
-	err = msp.GenerateLocalMSP(testDir, testName, nil, signCA, tlsCA, msp.PEER, nodeOUs)
+	err = msp.GenerateLocalMSP(testDir, testName, nil, signCA, tlsCA, msp.PEER, true)
 	assert.NoError(t, err, "Failed to generate local MSP")
 
 	// check to see that the right files were generated/saved
 	mspFiles := []string{
+		filepath.Join(mspDir, "admincerts", testName+"-cert.pem"),
 		filepath.Join(mspDir, "cacerts", testCAName+"-cert.pem"),
 		filepath.Join(mspDir, "tlscacerts", testCAName+"-cert.pem"),
 		filepath.Join(mspDir, "keystore"),
 		filepath.Join(mspDir, "signcerts", testName+"-cert.pem"),
+		filepath.Join(mspDir, "config.yaml"),
 	}
-	if nodeOUs {
-		mspFiles = append(mspFiles, filepath.Join(mspDir, "config.yaml"))
-	} else {
-		mspFiles = append(mspFiles, filepath.Join(mspDir, "admincerts", testName+"-cert.pem"))
-	}
-
 	tlsFiles := []string{
 		filepath.Join(tlsDir, "ca.crt"),
 		filepath.Join(tlsDir, "server.key"),
@@ -96,12 +93,13 @@ func testGenerateLocalMSP(t *testing.T, nodeOUs bool) {
 	}
 
 	// generate local MSP for nodeType=CLIENT
-	err = msp.GenerateLocalMSP(testDir, testName, nil, signCA, tlsCA, msp.CLIENT, nodeOUs)
+	err = msp.GenerateLocalMSP(testDir, testName, nil, signCA, tlsCA, msp.CLIENT, true)
 	assert.NoError(t, err, "Failed to generate local MSP")
-	// check all
-	for _, file := range mspFiles {
-		assert.Equal(t, true, checkForFile(file),
-			"Expected to find file "+file)
+	//only need to check for the TLS certs
+	tlsFiles = []string{
+		filepath.Join(tlsDir, "ca.crt"),
+		filepath.Join(tlsDir, "client.key"),
+		filepath.Join(tlsDir, "client.crt"),
 	}
 
 	for _, file := range tlsFiles {
@@ -118,24 +116,18 @@ func testGenerateLocalMSP(t *testing.T, nodeOUs bool) {
 	assert.NoError(t, err, "Error setting up local MSP")
 
 	tlsCA.Name = "test/fail"
-	err = msp.GenerateLocalMSP(testDir, testName, nil, signCA, tlsCA, msp.CLIENT, nodeOUs)
+	err = msp.GenerateLocalMSP(testDir, testName, nil, signCA, tlsCA, msp.CLIENT, true)
 	assert.Error(t, err, "Should have failed with CA name 'test/fail'")
 	signCA.Name = "test/fail"
-	err = msp.GenerateLocalMSP(testDir, testName, nil, signCA, tlsCA, msp.ORDERER, nodeOUs)
+	err = msp.GenerateLocalMSP(testDir, testName, nil, signCA, tlsCA, msp.ORDERER, true)
 	assert.Error(t, err, "Should have failed with CA name 'test/fail'")
 	t.Log(err)
 	cleanup(testDir)
+
 }
 
-func TestGenerateLocalMSPWithNodeOU(t *testing.T) {
-	testGenerateLocalMSP(t, true)
-}
+func TestGenerateVerifyingMSP(t *testing.T) {
 
-func TestGenerateLocalMSPWithoutNodeOU(t *testing.T) {
-	testGenerateLocalMSP(t, false)
-}
-
-func testGenerateVerifyingMSP(t *testing.T, nodeOUs bool) {
 	caDir := filepath.Join(testDir, "ca")
 	tlsCADir := filepath.Join(testDir, "tlsca")
 	mspDir := filepath.Join(testDir, "msp")
@@ -146,19 +138,15 @@ func testGenerateVerifyingMSP(t *testing.T, nodeOUs bool) {
 	tlsCA, err := ca.NewCA(tlsCADir, testCAOrg, testCAName, testCountry, testProvince, testLocality, testOrganizationalUnit, testStreetAddress, testPostalCode)
 	assert.NoError(t, err, "Error generating CA")
 
-	err = msp.GenerateVerifyingMSP(mspDir, signCA, tlsCA, nodeOUs)
+	err = msp.GenerateVerifyingMSP(mspDir, signCA, tlsCA, true)
 	assert.NoError(t, err, "Failed to generate verifying MSP")
 
 	// check to see that the right files were generated/saved
 	files := []string{
+		filepath.Join(mspDir, "admincerts", testCAName+"-cert.pem"),
 		filepath.Join(mspDir, "cacerts", testCAName+"-cert.pem"),
 		filepath.Join(mspDir, "tlscacerts", testCAName+"-cert.pem"),
-	}
-
-	if nodeOUs {
-		files = append(files, filepath.Join(mspDir, "config.yaml"))
-	} else {
-		files = append(files, filepath.Join(mspDir, "admincerts", testCAName+"-cert.pem"))
+		filepath.Join(mspDir, "config.yaml"),
 	}
 
 	for _, file := range files {
@@ -174,22 +162,13 @@ func testGenerateVerifyingMSP(t *testing.T, nodeOUs bool) {
 	assert.NoError(t, err, "Error setting up verifying MSP")
 
 	tlsCA.Name = "test/fail"
-	err = msp.GenerateVerifyingMSP(mspDir, signCA, tlsCA, nodeOUs)
+	err = msp.GenerateVerifyingMSP(mspDir, signCA, tlsCA, true)
 	assert.Error(t, err, "Should have failed with CA name 'test/fail'")
 	signCA.Name = "test/fail"
-	err = msp.GenerateVerifyingMSP(mspDir, signCA, tlsCA, nodeOUs)
+	err = msp.GenerateVerifyingMSP(mspDir, signCA, tlsCA, true)
 	assert.Error(t, err, "Should have failed with CA name 'test/fail'")
 	t.Log(err)
 	cleanup(testDir)
-
-}
-
-func TestGenerateVerifyingMSPWithNodeOU(t *testing.T) {
-	testGenerateVerifyingMSP(t, true)
-}
-
-func TestGenerateVerifyingMSPWithoutNodeOU(t *testing.T) {
-	testGenerateVerifyingMSP(t, true)
 }
 
 func TestExportConfig(t *testing.T) {
@@ -220,10 +199,6 @@ func TestExportConfig(t *testing.T) {
 	assert.Equal(t, msp.CLIENTOU, config.NodeOUs.ClientOUIdentifier.OrganizationalUnitIdentifier)
 	assert.Equal(t, caFile, config.NodeOUs.PeerOUIdentifier.Certificate)
 	assert.Equal(t, msp.PEEROU, config.NodeOUs.PeerOUIdentifier.OrganizationalUnitIdentifier)
-	assert.Equal(t, caFile, config.NodeOUs.AdminOUIdentifier.Certificate)
-	assert.Equal(t, msp.ADMINOU, config.NodeOUs.AdminOUIdentifier.OrganizationalUnitIdentifier)
-	assert.Equal(t, caFile, config.NodeOUs.OrdererOUIdentifier.Certificate)
-	assert.Equal(t, msp.ORDEREROU, config.NodeOUs.OrdererOUIdentifier.OrganizationalUnitIdentifier)
 }
 
 func cleanup(dir string) {

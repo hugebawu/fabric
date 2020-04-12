@@ -23,13 +23,32 @@ import (
 	"github.com/pkg/errors"
 )
 
-const DefAliveTimeInterval = 5 * time.Second
-const DefAliveExpirationTimeout = 5 * DefAliveTimeInterval
-const DefAliveExpirationCheckInterval = DefAliveExpirationTimeout / 10
-const DefReconnectInterval = DefAliveExpirationTimeout
+const defaultHelloInterval = time.Duration(5) * time.Second
 const msgExpirationFactor = 20
 
+var aliveExpirationCheckInterval time.Duration
 var maxConnectionAttempts = 120
+
+// SetAliveTimeInterval sets the alive time interval
+func SetAliveTimeInterval(interval time.Duration) {
+	util.SetVal("peer.gossip.aliveTimeInterval", interval)
+}
+
+// SetAliveExpirationTimeout sets the expiration timeout
+func SetAliveExpirationTimeout(timeout time.Duration) {
+	util.SetVal("peer.gossip.aliveExpirationTimeout", timeout)
+	aliveExpirationCheckInterval = time.Duration(timeout / 10)
+}
+
+// SetAliveExpirationCheckInterval sets the expiration check interval
+func SetAliveExpirationCheckInterval(interval time.Duration) {
+	aliveExpirationCheckInterval = interval
+}
+
+// SetReconnectInterval sets the reconnect interval
+func SetReconnectInterval(interval time.Duration) {
+	util.SetVal("peer.gossip.reconnectInterval", interval)
+}
 
 // SetMaxConnAttempts sets the maximum number of connection
 // attempts the peer would perform when invoking Connect()
@@ -75,21 +94,10 @@ type gossipDiscoveryImpl struct {
 	aliveExpirationTimeout       time.Duration
 	aliveExpirationCheckInterval time.Duration
 	reconnectInterval            time.Duration
-
-	bootstrapPeers []string
-}
-
-type DiscoveryConfig struct {
-	AliveTimeInterval            time.Duration
-	AliveExpirationTimeout       time.Duration
-	AliveExpirationCheckInterval time.Duration
-	ReconnectInterval            time.Duration
-	BootstrapPeers               []string
 }
 
 // NewDiscoveryService returns a new discovery service with the comm module passed and the crypto service passed
-func NewDiscoveryService(self NetworkMember, comm CommService, crypt CryptoService, disPol DisclosurePolicy,
-	config DiscoveryConfig) Discovery {
+func NewDiscoveryService(self NetworkMember, comm CommService, crypt CryptoService, disPol DisclosurePolicy) Discovery {
 	d := &gossipDiscoveryImpl{
 		self:             self,
 		incTime:          uint64(time.Now().UnixNano()),
@@ -108,12 +116,10 @@ func NewDiscoveryService(self NetworkMember, comm CommService, crypt CryptoServi
 		disclosurePolicy: disPol,
 		pubsub:           util.NewPubSub(),
 
-		aliveTimeInterval:            config.AliveTimeInterval,
-		aliveExpirationTimeout:       config.AliveExpirationTimeout,
-		aliveExpirationCheckInterval: config.AliveExpirationCheckInterval,
-		reconnectInterval:            config.ReconnectInterval,
-
-		bootstrapPeers: config.BootstrapPeers,
+		aliveTimeInterval:            getAliveTimeInterval(),
+		aliveExpirationTimeout:       getAliveExpirationTimeout(),
+		aliveExpirationCheckInterval: getAliveExpirationCheckInterval(),
+		reconnectInterval:            getReconnectInterval(),
 	}
 
 	d.validateSelfConfig()
@@ -123,7 +129,7 @@ func NewDiscoveryService(self NetworkMember, comm CommService, crypt CryptoServi
 	go d.periodicalCheckAlive()
 	go d.handleMessages()
 	go d.periodicalReconnectToDead()
-	go d.handleEvents()
+	go d.handlePresumedDeadPeers()
 
 	return d
 }
@@ -135,7 +141,8 @@ func (d *gossipDiscoveryImpl) Lookup(PKIID common.PKIidType) *NetworkMember {
 	}
 	d.lock.RLock()
 	defer d.lock.RUnlock()
-	return copyNetworkMember(d.id2Member[string(PKIID)])
+	nm := d.id2Member[string(PKIID)]
+	return nm
 }
 
 func (d *gossipDiscoveryImpl) Connect(member NetworkMember, id identifier) {
@@ -272,7 +279,7 @@ func (d *gossipDiscoveryImpl) InitiateSync(peerNum int) {
 	}
 }
 
-func (d *gossipDiscoveryImpl) handleEvents() {
+func (d *gossipDiscoveryImpl) handlePresumedDeadPeers() {
 	defer d.logger.Debug("Stopped")
 
 	for !d.toDie() {
@@ -281,9 +288,6 @@ func (d *gossipDiscoveryImpl) handleEvents() {
 			if d.isAlive(deadPeer) {
 				d.expireDeadMembers([]common.PKIidType{deadPeer})
 			}
-		case changedPKIID := <-d.comm.IdentitySwitch():
-			// If a peer changed its PKI-ID, purge the old PKI-ID
-			d.purge(changedPKIID)
 		case s := <-d.toDieChan:
 			d.toDieChan <- s
 			return
@@ -549,17 +553,6 @@ func (d *gossipDiscoveryImpl) handleAliveMessage(m *proto.SignedGossipMessage) {
 
 	}
 	// else, ignore the message because it is too old
-}
-
-func (d *gossipDiscoveryImpl) purge(id common.PKIidType) {
-	d.logger.Infof("Purging %s from membership", id)
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	d.aliveMembership.Remove(id)
-	d.deadMembership.Remove(id)
-	delete(d.id2Member, string(id))
-	delete(d.deadLastTS, string(id))
-	delete(d.aliveLastTS, string(id))
 }
 
 func (d *gossipDiscoveryImpl) isSentByMe(m *proto.SignedGossipMessage) bool {
@@ -1002,16 +995,6 @@ func (d *gossipDiscoveryImpl) Stop() {
 	d.toDieChan <- struct{}{}
 }
 
-func copyNetworkMember(member *NetworkMember) *NetworkMember {
-	if member == nil {
-		return nil
-	} else {
-		copiedNetworkMember := &NetworkMember{}
-		*copiedNetworkMember = *member
-		return copiedNetworkMember
-	}
-}
-
 func equalPKIid(a, b common.PKIidType) bool {
 	return bytes.Equal(a, b)
 }
@@ -1023,6 +1006,26 @@ func same(a *timestamp, b *proto.PeerTime) bool {
 func before(a *timestamp, b *proto.PeerTime) bool {
 	return (uint64(a.incTime.UnixNano()) == b.IncNum && a.seqNum < b.SeqNum) ||
 		uint64(a.incTime.UnixNano()) < b.IncNum
+}
+
+func getAliveTimeInterval() time.Duration {
+	return util.GetDurationOrDefault("peer.gossip.aliveTimeInterval", defaultHelloInterval)
+}
+
+func getAliveExpirationTimeout() time.Duration {
+	return util.GetDurationOrDefault("peer.gossip.aliveExpirationTimeout", 5*getAliveTimeInterval())
+}
+
+func getAliveExpirationCheckInterval() time.Duration {
+	if aliveExpirationCheckInterval != 0 {
+		return aliveExpirationCheckInterval
+	}
+
+	return time.Duration(getAliveExpirationTimeout() / 10)
+}
+
+func getReconnectInterval() time.Duration {
+	return util.GetDurationOrDefault("peer.gossip.reconnectInterval", getAliveExpirationTimeout())
 }
 
 type aliveMsgStore struct {
@@ -1040,15 +1043,7 @@ func newAliveMsgStore(d *gossipDiscoveryImpl) *aliveMsgStore {
 		if !msg.IsAliveMsg() {
 			return
 		}
-		membership := msg.GetAliveMsg().Membership
-		id := membership.PkiId
-		endpoint := membership.Endpoint
-		internalEndpoint := msg.SecretEnvelope.InternalEndpoint()
-		if util.Contains(endpoint, d.bootstrapPeers) || util.Contains(internalEndpoint, d.bootstrapPeers) {
-			// Never remove a bootstrap peer
-			return
-		}
-		d.logger.Infof("Removing member: Endpoint: %s, InternalEndpoint: %s, PKIID: %x", endpoint, internalEndpoint, id)
+		id := msg.GetAliveMsg().Membership.PkiId
 		d.aliveMembership.Remove(id)
 		d.deadMembership.Remove(id)
 		delete(d.id2Member, string(id))

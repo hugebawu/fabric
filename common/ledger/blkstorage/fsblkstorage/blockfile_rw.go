@@ -26,7 +26,7 @@ func newBlockfileWriter(filePath string) (*blockfileWriter, error) {
 func (w *blockfileWriter) truncateFile(targetSize int) error {
 	fileStat, err := w.file.Stat()
 	if err != nil {
-		return errors.Wrapf(err, "error truncating the file [%s] to size [%d]", w.filePath, targetSize)
+		return err
 	}
 	if fileStat.Size() > int64(targetSize) {
 		w.file.Truncate(int64(targetSize))

@@ -72,22 +72,9 @@ func (rs *responseSender) SendBlockResponse(block *cb.Block) error {
 }
 
 // NewServer creates an ab.AtomicBroadcastServer based on the broadcast target and ledger Reader
-func NewServer(
-	r *multichannel.Registrar,
-	metricsProvider metrics.Provider,
-	debug *localconfig.Debug,
-	timeWindow time.Duration,
-	mutualTLS bool,
-	expirationCheckDisabled bool,
-) ab.AtomicBroadcastServer {
+func NewServer(r *multichannel.Registrar, metricsProvider metrics.Provider, debug *localconfig.Debug, timeWindow time.Duration, mutualTLS bool) ab.AtomicBroadcastServer {
 	s := &server{
-		dh: deliver.NewHandler(
-			deliverSupport{Registrar: r},
-			timeWindow,
-			mutualTLS,
-			deliver.NewMetrics(metricsProvider),
-			expirationCheckDisabled,
-		),
+		dh: deliver.NewHandler(deliverSupport{Registrar: r}, timeWindow, mutualTLS, deliver.NewMetrics(metricsProvider)),
 		bh: &broadcast.Handler{
 			SupportRegistrar: broadcastSupport{Registrar: r},
 			Metrics:          broadcast.NewMetrics(metricsProvider),
@@ -183,9 +170,7 @@ func (s *server) Deliver(srv ab.AtomicBroadcast_DeliverServer) error {
 		if chain == nil {
 			return errors.Errorf("channel %s not found", channelID)
 		}
-		// In maintenance mode, we typically require the signature of /Channel/Orderer/Readers.
-		// This will block Deliver requests from peers (which normally satisfy /Channel/Readers).
-		sf := msgprocessor.NewSigFilter(policies.ChannelReaders, policies.ChannelOrdererReaders, chain)
+		sf := msgprocessor.NewSigFilter(policies.ChannelReaders, chain)
 		return sf.Apply(env)
 	}
 	deliverServer := &deliver.Server{

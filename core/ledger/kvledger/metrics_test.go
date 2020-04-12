@@ -20,6 +20,49 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestStatsBlockchainHeight(t *testing.T) {
+	env := newTestEnv(t)
+	defer env.cleanup()
+	testMetricProvider := testutilConstructMetricProvider()
+	provider, err := NewProvider()
+	assert.NoError(t, err)
+	provider.Initialize(&lgr.Initializer{
+		DeployedChaincodeInfoProvider: &mock.DeployedChaincodeInfoProvider{},
+		MetricsProvider:               testMetricProvider.fakeProvider,
+	})
+	defer provider.Close()
+
+	// create a ledger
+	ledgerid := "ledger1"
+	_, gb := testutil.NewBlockGenerator(t, ledgerid, false)
+	l, err := provider.Create(gb)
+	assert.NoError(t, err)
+	ledger := l.(*kvLedger)
+	defer ledger.Close()
+
+	fakeBlockchainHeightGauge := testMetricProvider.fakeBlockchainHeightGauge
+	// calls during ledger creation
+	assert.Equal(t, float64(0), fakeBlockchainHeightGauge.SetArgsForCall(0))
+	assert.Equal(t, []string{"channel", ledgerid}, fakeBlockchainHeightGauge.WithArgsForCall(0))
+
+	// calls during committing genesis block
+	assert.Equal(t, float64(1), fakeBlockchainHeightGauge.SetArgsForCall(1))
+	assert.Equal(t, []string{"channel", ledgerid}, fakeBlockchainHeightGauge.WithArgsForCall(1))
+
+	ledger.Close()
+	provider.Open(ledgerid)
+	// calls during opening an existing ledger - opening a ledger should set the current height
+	assert.Equal(t, float64(1), fakeBlockchainHeightGauge.SetArgsForCall(2))
+	assert.Equal(t, []string{"channel", ledgerid}, fakeBlockchainHeightGauge.WithArgsForCall(2))
+
+	// invoke updateBlockStats api explicitly and verify the calls with fake metrics
+	ledger.updateBlockStats(
+		10, 1*time.Second, 2*time.Second, 3*time.Second, nil,
+	)
+	assert.Equal(t, []string{"channel", ledgerid}, fakeBlockchainHeightGauge.WithArgsForCall(3))
+	assert.Equal(t, float64(11), fakeBlockchainHeightGauge.SetArgsForCall(3))
+}
+
 func TestStatsBlockCommit(t *testing.T) {
 	env := newTestEnv(t)
 	defer env.cleanup()
@@ -47,7 +90,7 @@ func TestStatsBlockCommit(t *testing.T) {
 	)
 	assert.Equal(t,
 		[]string{"channel", ledgerid},
-		testMetricProvider.fakeBlockstorageCommitWithPvtDataTimeHist.WithArgsForCall(0),
+		testMetricProvider.fakeBlockstorageCommitTimeHist.WithArgsForCall(0),
 	)
 	assert.Equal(t,
 		[]string{"channel", ledgerid},
@@ -65,7 +108,7 @@ func TestStatsBlockCommit(t *testing.T) {
 
 	// invoke updateBlockStats api explicitly and verify the calls with fake metrics
 	ledger.updateBlockStats(
-		1*time.Second, 2*time.Second, 3*time.Second,
+		10, 1*time.Second, 2*time.Second, 3*time.Second,
 		[]*txmgr.TxStatInfo{
 			{
 				ValidationCode: peer.TxValidationCode_VALID,
@@ -89,11 +132,11 @@ func TestStatsBlockCommit(t *testing.T) {
 	)
 	assert.Equal(t,
 		[]string{"channel", ledgerid},
-		testMetricProvider.fakeBlockstorageCommitWithPvtDataTimeHist.WithArgsForCall(1),
+		testMetricProvider.fakeBlockstorageCommitTimeHist.WithArgsForCall(1),
 	)
 	assert.Equal(t,
 		float64(2),
-		testMetricProvider.fakeBlockstorageCommitWithPvtDataTimeHist.ObserveArgsForCall(1),
+		testMetricProvider.fakeBlockstorageCommitTimeHist.ObserveArgsForCall(1),
 	)
 	assert.Equal(t,
 		[]string{"channel", ledgerid},
@@ -133,35 +176,38 @@ func TestStatsBlockCommit(t *testing.T) {
 }
 
 type testMetricProvider struct {
-	fakeProvider                              *metricsfakes.Provider
-	fakeBlockProcessingTimeHist               *metricsfakes.Histogram
-	fakeBlockstorageCommitWithPvtDataTimeHist *metricsfakes.Histogram
-	fakeStatedbCommitTimeHist                 *metricsfakes.Histogram
-	fakeTransactionsCount                     *metricsfakes.Counter
+	fakeProvider                   *metricsfakes.Provider
+	fakeBlockchainHeightGauge      *metricsfakes.Gauge
+	fakeBlockProcessingTimeHist    *metricsfakes.Histogram
+	fakeBlockstorageCommitTimeHist *metricsfakes.Histogram
+	fakeStatedbCommitTimeHist      *metricsfakes.Histogram
+	fakeTransactionsCount          *metricsfakes.Counter
 }
 
 func testutilConstructMetricProvider() *testMetricProvider {
 	fakeProvider := &metricsfakes.Provider{}
+	fakeBlockchainHeightGauge := testutilConstructGuage()
 	fakeBlockProcessingTimeHist := testutilConstructHist()
-	fakeBlockstorageCommitWithPvtDataTimeHist := testutilConstructHist()
+	fakeBlockstorageCommitTimeHist := testutilConstructHist()
 	fakeStatedbCommitTimeHist := testutilConstructHist()
 	fakeTransactionsCount := testutilConstructCounter()
 	fakeProvider.NewGaugeStub = func(opts metrics.GaugeOpts) metrics.Gauge {
-		// return a gauge for metrics in common/ledger
-		return testutilConstructGauge()
+		switch opts.Name {
+		case blockchainHeightOpts.Name:
+			return fakeBlockchainHeightGauge
+		}
+		return nil
 	}
 	fakeProvider.NewHistogramStub = func(opts metrics.HistogramOpts) metrics.Histogram {
 		switch opts.Name {
 		case blockProcessingTimeOpts.Name:
 			return fakeBlockProcessingTimeHist
-		case blockAndPvtdataStoreCommitTimeOpts.Name:
-			return fakeBlockstorageCommitWithPvtDataTimeHist
+		case blockstorageCommitTimeOpts.Name:
+			return fakeBlockstorageCommitTimeHist
 		case statedbCommitTimeOpts.Name:
 			return fakeStatedbCommitTimeHist
-		default:
-			// return a histogram for metrics in common/ledger
-			return testutilConstructHist()
 		}
+		return nil
 	}
 
 	fakeProvider.NewCounterStub = func(opts metrics.CounterOpts) metrics.Counter {
@@ -173,14 +219,15 @@ func testutilConstructMetricProvider() *testMetricProvider {
 	}
 	return &testMetricProvider{
 		fakeProvider,
+		fakeBlockchainHeightGauge,
 		fakeBlockProcessingTimeHist,
-		fakeBlockstorageCommitWithPvtDataTimeHist,
+		fakeBlockstorageCommitTimeHist,
 		fakeStatedbCommitTimeHist,
 		fakeTransactionsCount,
 	}
 }
 
-func testutilConstructGauge() *metricsfakes.Gauge {
+func testutilConstructGuage() *metricsfakes.Gauge {
 	fakeGauge := &metricsfakes.Gauge{}
 	fakeGauge.WithStub = func(lableValues ...string) metrics.Gauge {
 		return fakeGauge

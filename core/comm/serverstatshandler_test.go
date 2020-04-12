@@ -66,8 +66,8 @@ func TestConnMetricsGRPCServer(t *testing.T) {
 	srv, err := comm.NewGRPCServerFromListener(
 		listener,
 		comm.ServerConfig{
-			SecOpts:            &comm.SecureOptions{UseTLS: false},
-			ServerStatsHandler: comm.NewServerStatsHandler(fakeProvider),
+			SecOpts:         &comm.SecureOptions{UseTLS: false},
+			MetricsProvider: fakeProvider,
 		},
 	)
 	gt.Expect(err).NotTo(HaveOccurred())

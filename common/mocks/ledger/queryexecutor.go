@@ -71,10 +71,6 @@ func (m *MockQueryExecutor) GetPrivateData(namespace, collection, key string) ([
 	return nil, nil
 }
 
-func (m *MockQueryExecutor) GetPrivateDataHash(namespace, collection, key string) ([]byte, error) {
-	return nil, nil
-}
-
 func (m *MockQueryExecutor) GetPrivateDataMetadataByHash(namespace, collection string, keyhash []byte) (map[string][]byte, error) {
 	return nil, nil
 }

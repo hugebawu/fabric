@@ -1201,10 +1201,6 @@ func getLocalMSP(t *testing.T, dir string) MSP {
 }
 
 func getLocalMSPWithVersion(t *testing.T, dir string, version MSPVersion) MSP {
-	return getLocalMSPWithVersionErr(t, dir, version, "")
-}
-
-func getLocalMSPWithVersionErr(t *testing.T, dir string, version MSPVersion, expectedErr string) MSP {
 	conf, err := GetLocalMspConfig(dir, nil, "SampleOrg")
 	assert.NoError(t, err)
 
@@ -1217,12 +1213,7 @@ func getLocalMSPWithVersionErr(t *testing.T, dir string, version MSPVersion, exp
 	thisMSP.(*bccspmsp).bccsp = csp
 
 	err = thisMSP.Setup(conf)
-
-	if expectedErr != "" {
-		assert.EqualError(t, err, expectedErr)
-	} else {
-		assert.NoError(t, err)
-	}
+	assert.NoError(t, err)
 
 	return thisMSP
 }

@@ -55,23 +55,18 @@ func TestFetch(t *testing.T) {
 
 	// success cases - block and outputBlockPath
 	blocksToFetch := []string{"oldest", "newest", "config", "1"}
-	for _, bestEffort := range []bool{false, true} {
-		for _, block := range blocksToFetch {
-			outputBlockPath := filepath.Join(tempDir, block+".block")
-			args := []string{"-c", mockchain, block, outputBlockPath}
-			if bestEffort {
-				args = append(args, "--bestEffort")
-			}
-			cmd.SetArgs(args)
+	for _, block := range blocksToFetch {
+		outputBlockPath := filepath.Join(tempDir, block+".block")
+		args := []string{"-c", mockchain, block, outputBlockPath}
+		cmd.SetArgs(args)
 
-			err = cmd.Execute()
-			assert.NoError(t, err, "fetch command expected to succeed")
+		err = cmd.Execute()
+		assert.NoError(t, err, "fetch command expected to succeed")
 
-			if _, err := os.Stat(outputBlockPath); os.IsNotExist(err) {
-				// path/to/whatever does not exist
-				t.Error("expected configuration block to be fetched")
-				t.Fail()
-			}
+		if _, err := os.Stat(outputBlockPath); os.IsNotExist(err) {
+			// path/to/whatever does not exist
+			t.Error("expected configuration block to be fetched")
+			t.Fail()
 		}
 	}
 

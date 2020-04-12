@@ -9,7 +9,6 @@ package inproccontroller
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/core/chaincode/shim"
@@ -35,7 +34,7 @@ var (
 	inprocLogger = flogging.MustGetLogger("inproccontroller")
 
 	// TODO this is a very hacky way to do testing, we should find other ways
-	// to test, or not statically inject these dependencies.
+	// to test, or not statically inject these depenencies.
 	_shimStartInProc    = shim.StartInProc
 	_inprocLoggerErrorf = inprocLogger.Errorf
 )
@@ -52,10 +51,8 @@ func (s SysCCRegisteredErr) Error() string {
 // Registry stores registered system chaincodes.
 // It implements container.VMProvider and scc.Registrar
 type Registry struct {
-	mutex        sync.Mutex
-	typeRegistry map[string]*inprocContainer
-	instRegistry map[string]*inprocContainer
-
+	typeRegistry     map[string]*inprocContainer
+	instRegistry     map[string]*inprocContainer
 	ChaincodeSupport ccintf.CCSupport
 }
 
@@ -78,9 +75,6 @@ func (r *Registry) NewVM() container.VM {
 
 //Register registers system chaincode with given path. The deploy should be called to initialize
 func (r *Registry) Register(ccid *ccintf.CCID, cc shim.Chaincode) error {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
-
 	name := ccid.GetName()
 	inprocLogger.Debugf("Registering chaincode instance: %s", name)
 	tmp := r.typeRegistry[name]
@@ -92,31 +86,7 @@ func (r *Registry) Register(ccid *ccintf.CCID, cc shim.Chaincode) error {
 	return nil
 }
 
-func (r *Registry) getType(name string) *inprocContainer {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
-	return r.typeRegistry[name]
-}
-
-func (r *Registry) getInstance(name string) *inprocContainer {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
-	return r.instRegistry[name]
-}
-
-func (r *Registry) setInstance(name string, inst *inprocContainer) {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
-	r.instRegistry[name] = inst
-}
-
-func (r *Registry) removeInstance(name string) {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
-	delete(r.instRegistry, name)
-}
-
-// InprocVM is a vm. It is identified by a executable name
+//InprocVM is a vm. It is identified by a executable name
 type InprocVM struct {
 	id       string
 	registry *Registry
@@ -130,7 +100,7 @@ func NewInprocVM(r *Registry) *InprocVM {
 }
 
 func (vm *InprocVM) getInstance(ipctemplate *inprocContainer, instName string, args []string, env []string) (*inprocContainer, error) {
-	ipc := vm.registry.getInstance(instName)
+	ipc := vm.registry.instRegistry[instName]
 	if ipc != nil {
 		inprocLogger.Warningf("chaincode instance exists for %s", instName)
 		return ipc, nil
@@ -142,7 +112,7 @@ func (vm *InprocVM) getInstance(ipctemplate *inprocContainer, instName string, a
 		chaincode:        ipctemplate.chaincode,
 		stopChan:         make(chan struct{}),
 	}
-	vm.registry.setInstance(instName, ipc)
+	vm.registry.instRegistry[instName] = ipc
 	inprocLogger.Debugf("chaincode instance created for %s", instName)
 	return ipc, nil
 }
@@ -208,7 +178,8 @@ func (ipc *inprocContainer) launchInProc(id string, args []string, env []string)
 func (vm *InprocVM) Start(ccid ccintf.CCID, args []string, env []string, filesToUpload map[string][]byte, builder container.Builder) error {
 	path := ccid.GetName()
 
-	ipctemplate := vm.registry.getType(path)
+	ipctemplate := vm.registry.typeRegistry[path]
+
 	if ipctemplate == nil {
 		return fmt.Errorf(fmt.Sprintf("%s not registered", path))
 	}
@@ -243,14 +214,15 @@ func (vm *InprocVM) Start(ccid ccintf.CCID, args []string, env []string, filesTo
 func (vm *InprocVM) Stop(ccid ccintf.CCID, timeout uint, dontkill bool, dontremove bool) error {
 	path := ccid.GetName()
 
-	ipctemplate := vm.registry.getType(path)
+	ipctemplate := vm.registry.typeRegistry[path]
 	if ipctemplate == nil {
 		return fmt.Errorf("%s not registered", path)
 	}
 
 	instName := vm.GetVMName(ccid)
 
-	ipc := vm.registry.getInstance(instName)
+	ipc := vm.registry.instRegistry[instName]
+
 	if ipc == nil {
 		return fmt.Errorf("%s not found", instName)
 	}
@@ -259,10 +231,9 @@ func (vm *InprocVM) Stop(ccid ccintf.CCID, timeout uint, dontkill bool, dontremo
 		return fmt.Errorf("%s not running", instName)
 	}
 
-	ipc.running = false
-	close(ipc.stopChan)
-	vm.registry.removeInstance(instName)
+	ipc.stopChan <- struct{}{}
 
+	delete(vm.registry.instRegistry, instName)
 	//TODO stop
 	return nil
 }
@@ -271,19 +242,6 @@ func (vm *InprocVM) Stop(ccid ccintf.CCID, timeout uint, dontkill bool, dontremo
 // It always returns nil..
 func (vm *InprocVM) HealthCheck(ctx context.Context) error {
 	return nil
-}
-
-// Wait will block until the chaincode is stopped.
-func (vm *InprocVM) Wait(ccid ccintf.CCID) (int, error) {
-	instName := vm.GetVMName(ccid)
-	ipc := vm.registry.getInstance(instName)
-	if ipc == nil {
-		return 0, fmt.Errorf("%s not found", instName)
-	}
-
-	<-ipc.stopChan
-
-	return 0, nil
 }
 
 // GetVMName ignores the peer and network name as it just needs to be unique in

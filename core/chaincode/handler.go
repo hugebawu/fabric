@@ -149,8 +149,6 @@ type Handler struct {
 	UUIDGenerator UUIDGenerator
 	// AppConfig is used to retrieve the application config for a channel
 	AppConfig ApplicationConfigRetriever
-	// Metrics holds chaincode handler metrics
-	Metrics *HandlerMetrics
 
 	// state holds the current handler state. It will be created, established, or
 	// ready.
@@ -168,10 +166,8 @@ type Handler struct {
 	chatStream ccintf.ChaincodeStream
 	// errChan is used to communicate errors from the async send to the receive loop
 	errChan chan error
-	// mutex is used to serialze the stream closed chan.
-	mutex sync.Mutex
-	// streamDoneChan is closed when the chaincode stream terminates.
-	streamDoneChan chan struct{}
+	// Metrics holds chaincode handler metrics
+	Metrics *HandlerMetrics
 }
 
 // handleMessage is called by ProcessStream to dispatch messages.
@@ -213,6 +209,7 @@ func (h *Handler) handleMessageReadyState(msg *pb.ChaincodeMessage) error {
 		go h.HandleTransaction(msg, h.HandleDelState)
 	case pb.ChaincodeMessage_INVOKE_CHAINCODE:
 		go h.HandleTransaction(msg, h.HandleInvokeChaincode)
+
 	case pb.ChaincodeMessage_GET_STATE:
 		go h.HandleTransaction(msg, h.HandleGetState)
 	case pb.ChaincodeMessage_GET_STATE_BY_RANGE:
@@ -225,8 +222,7 @@ func (h *Handler) handleMessageReadyState(msg *pb.ChaincodeMessage) error {
 		go h.HandleTransaction(msg, h.HandleQueryStateNext)
 	case pb.ChaincodeMessage_QUERY_STATE_CLOSE:
 		go h.HandleTransaction(msg, h.HandleQueryStateClose)
-	case pb.ChaincodeMessage_GET_PRIVATE_DATA_HASH:
-		go h.HandleTransaction(msg, h.HandleGetPrivateDataHash)
+
 	case pb.ChaincodeMessage_GET_STATE_METADATA:
 		go h.HandleTransaction(msg, h.HandleGetStateMetadata)
 	case pb.ChaincodeMessage_PUT_STATE_METADATA:
@@ -393,19 +389,8 @@ func (h *Handler) deregister() {
 	}
 }
 
-func (h *Handler) streamDone() <-chan struct{} {
-	h.mutex.Lock()
-	defer h.mutex.Unlock()
-	return h.streamDoneChan
-}
-
 func (h *Handler) ProcessStream(stream ccintf.ChaincodeStream) error {
 	defer h.deregister()
-
-	h.mutex.Lock()
-	h.streamDoneChan = make(chan struct{})
-	h.mutex.Unlock()
-	defer close(h.streamDoneChan)
 
 	h.chatStream = stream
 	h.errChan = make(chan error, 1)
@@ -587,7 +572,7 @@ func (h *Handler) checkMetadataCap(msg *pb.ChaincodeMessage) error {
 	}
 
 	if !ac.Capabilities().KeyLevelEndorsement() {
-		return errors.New("key level endorsement is not enabled, channel application capability of V1_3 or later is required")
+		return errors.New("key level endorsement is not enabled")
 	}
 	return nil
 }
@@ -658,31 +643,6 @@ func (h *Handler) HandleGetState(msg *pb.ChaincodeMessage, txContext *Transactio
 		chaincodeLogger.Debugf("[%s] No state associated with key: %s. Sending %s with an empty payload", shorttxid(msg.Txid), getState.Key, pb.ChaincodeMessage_RESPONSE)
 	}
 
-	// Send response msg back to chaincode. GetState will not trigger event
-	return &pb.ChaincodeMessage{Type: pb.ChaincodeMessage_RESPONSE, Payload: res, Txid: msg.Txid, ChannelId: msg.ChannelId}, nil
-}
-
-func (h *Handler) HandleGetPrivateDataHash(msg *pb.ChaincodeMessage, txContext *TransactionContext) (*pb.ChaincodeMessage, error) {
-	getState := &pb.GetState{}
-	err := proto.Unmarshal(msg.Payload, getState)
-	if err != nil {
-		return nil, errors.Wrap(err, "unmarshal failed")
-	}
-
-	var res []byte
-	chaincodeName := h.ChaincodeName()
-	collection := getState.Collection
-	chaincodeLogger.Debugf("[%s] getting private data hash for chaincode %s, key %s, channel %s", shorttxid(msg.Txid), chaincodeName, getState.Key, txContext.ChainID)
-	if txContext.IsInitTransaction {
-		return nil, errors.New("private data APIs are not allowed in chaincode Init()")
-	}
-	res, err = txContext.TXSimulator.GetPrivateDataHash(chaincodeName, collection, getState.Key)
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-	if res == nil {
-		chaincodeLogger.Debugf("[%s] No state associated with key: %s. Sending %s with an empty payload", shorttxid(msg.Txid), getState.Key, pb.ChaincodeMessage_RESPONSE)
-	}
 	// Send response msg back to chaincode. GetState will not trigger event
 	return &pb.ChaincodeMessage{Type: pb.ChaincodeMessage_RESPONSE, Payload: res, Txid: msg.Txid, ChannelId: msg.ChannelId}, nil
 }
@@ -1264,9 +1224,9 @@ func (h *Handler) Execute(txParams *ccprovider.TransactionParams, cccid *ccprovi
 	case <-time.After(timeout):
 		err = errors.New("timeout expired while executing transaction")
 		ccName := cccid.Name + ":" + cccid.Version
-		h.Metrics.ExecuteTimeouts.With("chaincode", ccName).Add(1)
-	case <-h.streamDone():
-		err = errors.New("chaincode stream terminated")
+		h.Metrics.ExecuteTimeouts.With(
+			"chaincode", ccName,
+		).Add(1)
 	}
 
 	return ccresp, err

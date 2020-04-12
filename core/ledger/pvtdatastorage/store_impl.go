@@ -165,11 +165,11 @@ func (s *store) Init(btlPolicy pvtdatapolicy.BTLPolicy) {
 func (s *store) Prepare(blockNum uint64, pvtData []*ledger.TxPvtData, missingPvtData ledger.TxMissingPvtDataMap) error {
 	if s.batchPending {
 		return &ErrIllegalCall{`A pending batch exists as as result of last invoke to "Prepare" call.
-			 Invoke "Commit" on the pending batch before invoking "Prepare" function`}
+			 Invoke "Commit" or "Rollback" on the pending batch before invoking "Prepare" function`}
 	}
 	expectedBlockNum := s.nextBlockNum()
 	if expectedBlockNum != blockNum {
-		return &ErrIllegalArgs{fmt.Sprintf("Expected block number=%d, received block number=%d", expectedBlockNum, blockNum)}
+		return &ErrIllegalArgs{fmt.Sprintf("Expected block number=%d, recived block number=%d", expectedBlockNum, blockNum)}
 	}
 
 	batch := leveldbhelper.NewUpdateBatch()
@@ -229,9 +229,41 @@ func (s *store) Commit() error {
 	}
 	s.batchPending = false
 	s.isEmpty = false
-	atomic.StoreUint64(&s.lastCommittedBlock, committingBlockNum)
+	s.lastCommittedBlock = committingBlockNum
 	logger.Debugf("Committed private data for block [%d]", committingBlockNum)
 	s.performPurgeIfScheduled(committingBlockNum)
+	return nil
+}
+
+// Rollback implements the function in the interface `Store`
+// This deletes the existing data entries and eligible missing data entries.
+// However, this does not delete ineligible missing data entires as the next try
+// would have exact same entries and will overwrite those. This also leaves the
+// existing expiry entires as is because, most likely they will also get overwritten
+// per new data entries. Even if some of the expiry entries does not get overwritten,
+// (beacuse of some data may be missing next time), the additional expiry entries are just
+// a Noop
+func (s *store) Rollback() error {
+	if !s.batchPending {
+		return &ErrIllegalCall{"No pending batch to rollback"}
+	}
+	blkNum := s.nextBlockNum()
+	batch := leveldbhelper.NewUpdateBatch()
+	itr := s.db.GetIterator(datakeyRange(blkNum))
+	for itr.Next() {
+		batch.Delete(itr.Key())
+	}
+	itr.Release()
+	itr = s.db.GetIterator(eligibleMissingdatakeyRange(blkNum))
+	for itr.Next() {
+		batch.Delete(itr.Key())
+	}
+	itr.Release()
+	batch.Delete(pendingCommitKey)
+	if err := s.db.WriteBatch(batch, true); err != nil {
+		return err
+	}
+	s.batchPending = false
 	return nil
 }
 
@@ -578,9 +610,8 @@ func (s *store) GetPvtDataByBlockNum(blockNum uint64, filter ledger.PvtNsCollFil
 	if s.isEmpty {
 		return nil, &ErrOutOfRange{"The store is empty"}
 	}
-	lastCommittedBlock := atomic.LoadUint64(&s.lastCommittedBlock)
-	if blockNum > lastCommittedBlock {
-		return nil, &ErrOutOfRange{fmt.Sprintf("Last committed block=%d, block requested=%d", lastCommittedBlock, blockNum)}
+	if blockNum > s.lastCommittedBlock {
+		return nil, &ErrOutOfRange{fmt.Sprintf("Last committed block=%d, block requested=%d", s.lastCommittedBlock, blockNum)}
 	}
 	startKey, endKey := getDataKeysForRangeScanByBlockNum(blockNum)
 	logger.Debugf("Querying private data storage for write sets using startKey=%#v, endKey=%#v", startKey, endKey)
@@ -594,19 +625,12 @@ func (s *store) GetPvtDataByBlockNum(blockNum uint64, filter ledger.PvtNsCollFil
 
 	for itr.Next() {
 		dataKeyBytes := itr.Key()
-		v11Fmt, err := v11Format(dataKeyBytes)
-		if err != nil {
-			return nil, err
-		}
-		if v11Fmt {
+		if v11Format(dataKeyBytes) {
 			return v11RetrievePvtdata(itr, filter)
 		}
 		dataValueBytes := itr.Value()
-		dataKey, err := decodeDatakey(dataKeyBytes)
-		if err != nil {
-			return nil, err
-		}
-		expired, err := isExpired(dataKey.nsCollBlk, s.btlPolicy, lastCommittedBlock)
+		dataKey := decodeDatakey(dataKeyBytes)
+		expired, err := isExpired(dataKey.nsCollBlk, s.btlPolicy, s.lastCommittedBlock)
 		if err != nil {
 			return nil, err
 		}
@@ -796,10 +820,7 @@ func (s *store) retrieveExpiryEntries(minBlkNum, maxBlkNum uint64) ([]*expiryEnt
 	for itr.Next() {
 		expiryKeyBytes := itr.Key()
 		expiryValueBytes := itr.Value()
-		expiryKey, err := decodeExpiryKey(expiryKeyBytes)
-		if err != nil {
-			return nil, err
-		}
+		expiryKey := decodeExpiryKey(expiryKeyBytes)
 		expiryValue, err := decodeExpiryValue(expiryValueBytes)
 		if err != nil {
 			return nil, err
@@ -888,7 +909,7 @@ func (s *store) LastCommittedBlockHeight() (uint64, error) {
 	if s.isEmpty {
 		return 0, nil
 	}
-	return atomic.LoadUint64(&s.lastCommittedBlock) + 1, nil
+	return s.lastCommittedBlock + 1, nil
 }
 
 // HasPendingBatch implements the function in the interface `Store`
@@ -910,7 +931,7 @@ func (s *store) nextBlockNum() uint64 {
 	if s.isEmpty {
 		return 0
 	}
-	return atomic.LoadUint64(&s.lastCommittedBlock) + 1
+	return s.lastCommittedBlock + 1
 }
 
 func (s *store) hasPendingCommit() (bool, error) {

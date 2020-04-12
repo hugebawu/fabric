@@ -39,7 +39,6 @@ type DeliverClient struct {
 	Service     api.DeliverService
 	ChannelID   string
 	TLSCertHash []byte
-	BestEffort  bool
 }
 
 func (d *DeliverClient) seekSpecified(blockNumber uint64) error {
@@ -50,17 +49,17 @@ func (d *DeliverClient) seekSpecified(blockNumber uint64) error {
 			},
 		},
 	}
-	env := seekHelper(d.ChannelID, seekPosition, d.TLSCertHash, d.BestEffort)
+	env := seekHelper(d.ChannelID, seekPosition, d.TLSCertHash)
 	return d.Service.Send(env)
 }
 
 func (d *DeliverClient) seekOldest() error {
-	env := seekHelper(d.ChannelID, seekOldest, d.TLSCertHash, d.BestEffort)
+	env := seekHelper(d.ChannelID, seekOldest, d.TLSCertHash)
 	return d.Service.Send(env)
 }
 
 func (d *DeliverClient) seekNewest() error {
-	env := seekHelper(d.ChannelID, seekNewest, d.TLSCertHash, d.BestEffort)
+	env := seekHelper(d.ChannelID, seekNewest, d.TLSCertHash)
 	return d.Service.Send(env)
 }
 
@@ -118,20 +117,11 @@ func (d *DeliverClient) Close() error {
 	return d.Service.CloseSend()
 }
 
-func seekHelper(
-	channelID string,
-	position *ab.SeekPosition,
-	tlsCertHash []byte,
-	bestEffort bool,
-) *cb.Envelope {
+func seekHelper(channelID string, position *ab.SeekPosition, tlsCertHash []byte) *cb.Envelope {
 	seekInfo := &ab.SeekInfo{
 		Start:    position,
 		Stop:     position,
 		Behavior: ab.SeekInfo_BLOCK_UNTIL_READY,
-	}
-
-	if bestEffort {
-		seekInfo.ErrorResponse = ab.SeekInfo_BEST_EFFORT
 	}
 
 	env, err := utils.CreateSignedEnvelopeWithTLSBinding(
@@ -156,7 +146,7 @@ type ordererDeliverService struct {
 }
 
 // NewDeliverClientForOrderer creates a new DeliverClient from an OrdererClient
-func NewDeliverClientForOrderer(channelID string, bestEffort bool) (*DeliverClient, error) {
+func NewDeliverClientForOrderer(channelID string) (*DeliverClient, error) {
 	var tlsCertHash []byte
 	oc, err := NewOrdererClientFromEnv()
 	if err != nil {
@@ -176,7 +166,6 @@ func NewDeliverClientForOrderer(channelID string, bestEffort bool) (*DeliverClie
 		Service:     ds,
 		ChannelID:   channelID,
 		TLSCertHash: tlsCertHash,
-		BestEffort:  bestEffort,
 	}
 	return o, nil
 }
@@ -186,7 +175,7 @@ type peerDeliverService struct {
 }
 
 // NewDeliverClientForPeer creates a new DeliverClient from a PeerClient
-func NewDeliverClientForPeer(channelID string, bestEffort bool) (*DeliverClient, error) {
+func NewDeliverClientForPeer(channelID string) (*DeliverClient, error) {
 	var tlsCertHash []byte
 	pc, err := NewPeerClientFromEnv()
 	if err != nil {
@@ -207,7 +196,6 @@ func NewDeliverClientForPeer(channelID string, bestEffort bool) (*DeliverClient,
 		Service:     ds,
 		ChannelID:   channelID,
 		TLSCertHash: tlsCertHash,
-		BestEffort:  bestEffort,
 	}
 	return p, nil
 }

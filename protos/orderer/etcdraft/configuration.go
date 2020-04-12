@@ -27,14 +27,13 @@ type ConsensusTypeMetadataFactory struct{}
 
 // NewMessage implements the Orderer.ConsensusTypeMetadataFactory interface.
 func (dogf ConsensusTypeMetadataFactory) NewMessage() proto.Message {
-	return &ConfigMetadata{}
+	return &Metadata{}
 }
 
 // Marshal serializes this implementation's proto messages. It is called by the encoder package
 // during the creation of the Orderer ConfigGroup.
-func Marshal(md *ConfigMetadata) ([]byte, error) {
-	copyMd := proto.Clone(md).(*ConfigMetadata)
-	for _, c := range copyMd.Consenters {
+func Marshal(md *Metadata) ([]byte, error) {
+	for _, c := range md.Consenters {
 		// Expect the user to set the config value for client/server certs to the
 		// path where they are persisted locally, then load these files to memory.
 		clientCert, err := ioutil.ReadFile(string(c.GetClientTlsCert()))
@@ -49,5 +48,5 @@ func Marshal(md *ConfigMetadata) ([]byte, error) {
 		}
 		c.ServerTlsCert = serverCert
 	}
-	return proto.Marshal(copyMd)
+	return proto.Marshal(md)
 }

@@ -10,7 +10,6 @@ import (
 	"reflect"
 
 	"github.com/hyperledger/fabric/common/channelconfig"
-	deliverclient "github.com/hyperledger/fabric/core/deliverservice"
 	"github.com/hyperledger/fabric/protos/peer"
 )
 
@@ -19,15 +18,8 @@ type Config interface {
 	// ChainID returns the chainID for this channel
 	ChainID() string
 
-	// OrdererOrgs returns the organizations of the orderers
-	OrdererOrgs() []string
-
-	// OrdererAddressesByOrgs returns a mapping from the organization ID
-	// to the endpoints of the orderers
-	OrdererAddressesByOrgs() map[string][]string
-
-	// ApplicationOrgs returns a map of org ID to ApplicationOrgConfig
-	ApplicationOrgs() ApplicationOrgs
+	// Organizations returns a map of org ID to ApplicationOrgConfig
+	Organizations() map[string]channelconfig.ApplicationOrg
 
 	// Sequence should return the sequence number of the current configuration
 	Sequence() uint64
@@ -35,9 +27,6 @@ type Config interface {
 	// OrdererAddresses returns the list of valid orderer addresses to connect to to invoke Broadcast/Deliver
 	OrdererAddresses() []string
 }
-
-// ApplicationOrgs defines a mapping from ApplicationOrg by ID.
-type ApplicationOrgs map[string]channelconfig.ApplicationOrg
 
 // ConfigProcessor receives config updates
 type ConfigProcessor interface {
@@ -52,7 +41,7 @@ type configStore struct {
 
 type configEventReceiver interface {
 	updateAnchors(config Config)
-	updateEndpoints(chainID string, criteria deliverclient.ConnectionCriteria)
+	updateEndpoints(chainID string, endpoints []string)
 }
 
 type configEventer struct {
@@ -72,13 +61,13 @@ func newConfigEventer(receiver configEventReceiver) *configEventer {
 // Note, that a changing sequence number is ignored as changing configuration
 func (ce *configEventer) ProcessConfigUpdate(config Config) {
 	logger.Debugf("Processing new config for channel %s", config.ChainID())
-	orgMap := cloneOrgConfig(config.ApplicationOrgs())
+	orgMap := cloneOrgConfig(config.Organizations())
 	if ce.lastConfig != nil && reflect.DeepEqual(ce.lastConfig.orgMap, orgMap) {
 		logger.Debugf("Ignoring new config for channel %s because it contained no anchor peer updates", config.ChainID())
 	} else {
 
 		var newAnchorPeers []*peer.AnchorPeer
-		for _, group := range config.ApplicationOrgs() {
+		for _, group := range config.Organizations() {
 			newAnchorPeers = append(newAnchorPeers, group.AnchorPeers()...)
 		}
 
@@ -91,12 +80,7 @@ func (ce *configEventer) ProcessConfigUpdate(config Config) {
 		logger.Debugf("Calling out because config was updated for channel %s", config.ChainID())
 		ce.receiver.updateAnchors(config)
 	}
-
-	ce.receiver.updateEndpoints(config.ChainID(), deliverclient.ConnectionCriteria{
-		OrdererEndpointsByOrg: config.OrdererAddressesByOrgs(),
-		Organizations:         config.OrdererOrgs(),
-		OrdererEndpoints:      config.OrdererAddresses(),
-	})
+	ce.receiver.updateEndpoints(config.ChainID(), config.OrdererAddresses())
 }
 
 func cloneOrgConfig(src map[string]channelconfig.ApplicationOrg) map[string]channelconfig.ApplicationOrg {

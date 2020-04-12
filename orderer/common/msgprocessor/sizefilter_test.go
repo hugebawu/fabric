@@ -19,31 +19,16 @@ import (
 func TestMaxBytesRule(t *testing.T) {
 	dataSize := uint32(100)
 	maxBytes := calcMessageBytesForPayloadDataSize(dataSize)
-	mcr := &mockconfig.Resources{
-		OrdererConfigVal: &mockconfig.Orderer{
-			BatchSizeVal: &ab.BatchSize{AbsoluteMaxBytes: maxBytes},
-		},
-	}
-	msf := NewSizeFilter(mcr)
+	msf := NewSizeFilter(&mockconfig.Orderer{BatchSizeVal: &ab.BatchSize{AbsoluteMaxBytes: maxBytes}})
 
-	t.Run("Less Than", func(t *testing.T) {
+	t.Run("LessThan", func(t *testing.T) {
 		assert.Nil(t, msf.Apply(makeMessage(make([]byte, dataSize-1))))
 	})
-
 	t.Run("Exact", func(t *testing.T) {
 		assert.Nil(t, msf.Apply(makeMessage(make([]byte, dataSize))))
 	})
-
-	t.Run("Too Big", func(t *testing.T) {
+	t.Run("TooBig", func(t *testing.T) {
 		assert.NotNil(t, msf.Apply(makeMessage(make([]byte, dataSize+1))))
-	})
-
-	t.Run("Dynamic Resources", func(t *testing.T) {
-		assert.NotNil(t, msf.Apply(makeMessage(make([]byte, dataSize+1))))
-		mcr.OrdererConfigVal = &mockconfig.Orderer{
-			BatchSizeVal: &ab.BatchSize{AbsoluteMaxBytes: maxBytes + 2},
-		}
-		assert.Nil(t, msf.Apply(makeMessage(make([]byte, dataSize+1))))
 	})
 }
 

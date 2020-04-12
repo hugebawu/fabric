@@ -24,21 +24,16 @@ const (
 	CLIENT = iota
 	ORDERER
 	PEER
-	ADMIN
 )
 
 const (
-	CLIENTOU  = "client"
-	PEEROU    = "peer"
-	ADMINOU   = "admin"
-	ORDEREROU = "orderer"
+	CLIENTOU = "client"
+	PEEROU   = "peer"
 )
 
 var nodeOUMap = map[int]string{
-	CLIENT:  CLIENTOU,
-	PEER:    PEEROU,
-	ADMIN:   ADMINOU,
-	ORDERER: ORDEREROU,
+	CLIENT: CLIENTOU,
+	PEER:   PEEROU,
 }
 
 func GenerateLocalMSP(baseDir, name string, sans []string, signCA *ca.CA,
@@ -100,9 +95,8 @@ func GenerateLocalMSP(baseDir, name string, sans []string, signCA *ca.CA,
 	}
 
 	// generate config.yaml if required
-	if nodeOUs {
-
-		exportConfig(mspDir, filepath.Join("cacerts", x509Filename(signCA.Name)), true)
+	if nodeOUs && nodeType == PEER {
+		exportConfig(mspDir, "cacerts/"+x509Filename(signCA.Name), true)
 	}
 
 	// the signing identity goes into admincerts.
@@ -112,11 +106,9 @@ func GenerateLocalMSP(baseDir, name string, sans []string, signCA *ca.CA,
 	// cleared up anyway by copyAdminCert, but
 	// we leave a valid admin for now for the sake
 	// of unit tests
-	if !nodeOUs {
-		err = x509Export(filepath.Join(mspDir, "admincerts", x509Filename(name)), cert)
-		if err != nil {
-			return err
-		}
+	err = x509Export(filepath.Join(mspDir, "admincerts", x509Filename(name)), cert)
+	if err != nil {
+		return err
 	}
 
 	/*
@@ -147,7 +139,7 @@ func GenerateLocalMSP(baseDir, name string, sans []string, signCA *ca.CA,
 
 	// rename the generated TLS X509 cert
 	tlsFilePrefix := "server"
-	if nodeType == CLIENT || nodeType == ADMIN {
+	if nodeType == CLIENT {
 		tlsFilePrefix = "client"
 	}
 	err = os.Rename(filepath.Join(tlsDir, x509Filename(name)),
@@ -191,10 +183,6 @@ func GenerateVerifyingMSP(baseDir string, signCA *ca.CA, tlsCA *ca.CA, nodeOUs b
 	// cleared up anyway by copyAdminCert, but
 	// we leave a valid admin for now for the sake
 	// of unit tests
-	if nodeOUs {
-		return nil
-	}
-
 	factory.InitFactories(nil)
 	bcsp := factory.GetDefault()
 	priv, err := bcsp.KeyGen(&bccsp.ECDSAP256KeyGenOpts{Temporary: true})
@@ -207,6 +195,7 @@ func GenerateVerifyingMSP(baseDir string, signCA *ca.CA, tlsCA *ca.CA, nodeOUs b
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -270,14 +259,6 @@ func exportConfig(mspDir, caFile string, enable bool) error {
 			PeerOUIdentifier: &fabricmsp.OrganizationalUnitIdentifiersConfiguration{
 				Certificate:                  caFile,
 				OrganizationalUnitIdentifier: PEEROU,
-			},
-			AdminOUIdentifier: &fabricmsp.OrganizationalUnitIdentifiersConfiguration{
-				Certificate:                  caFile,
-				OrganizationalUnitIdentifier: ADMINOU,
-			},
-			OrdererOUIdentifier: &fabricmsp.OrganizationalUnitIdentifiersConfiguration{
-				Certificate:                  caFile,
-				OrganizationalUnitIdentifier: ORDEREROU,
 			},
 		},
 	}
