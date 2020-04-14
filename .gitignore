@@ -5,7 +5,7 @@ node-cli/node-cli
 *.pyc
 /bin
 docs/build/*
-examples/e2e_cli/docker-compose-e2e.yamlt
+examples/e2e_cli/docker-compose-e2e.yaml
 .idea
 *.iml
 .DS_Store
@@ -43,7 +43,6 @@ bin/
 examples/e2e_cli/channel-artifacts/*.tx
 examples/e2e_cli/channel-artifacts/*.block
 examples/e2e_cli/crypto-config/*
-examples/e2e_cli/docker-compose-e2e.yaml
 # tox
 .tox/
 # vscode settings
@@ -52,3 +51,4 @@ maven_data.xml
 examples/solo-network/artifact/*
 examples/solo-network/data/*
 examples/solo-network/mini-ca/artifact/*
+scripts/fabric-samples
