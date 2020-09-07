@@ -19,6 +19,7 @@ build/
 /release/linux-s390x
 /release/linux-ppc64le
 /release/windows-amd64
+
 # Emacs backup files
 *~
 *#
@@ -51,4 +52,6 @@ maven_data.xml
 examples/solo-network/artifact/*
 examples/solo-network/data/*
 examples/solo-network/mini-ca/artifact/*
+examples/solo-network/msp/*
+examples/solo-network/genesis.block
 scripts/fabric-samples
