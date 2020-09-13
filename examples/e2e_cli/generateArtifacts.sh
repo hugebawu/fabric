@@ -27,6 +27,10 @@ function replacePrivateKey () {
 		OPTS="-i"
 	fi
 
+  echo
+	echo "#################################################################"
+	echo "#######  replacePrivateKey in the docker-compose-e2e.yaml #######"
+	echo "#################################################################"
 	cp docker-compose-e2e-template.yaml docker-compose-e2e.yaml
 
         CURRENT_DIR=$PWD
@@ -44,7 +48,7 @@ function replacePrivateKey () {
 function generateCerts (){
 	CRYPTOGEN=$FABRIC_ROOT/release/$OS_ARCH/bin/cryptogen
 
-	if [ -f "$CRYPTOGEN" ]; then
+	if [ -f "$CRYPTOGEN" ]; then # 检测文件是否是普通文件（既不是目录，也不是设备文件）
             echo "Using cryptogen -> $CRYPTOGEN"
 	else
 	    echo "Building cryptogen"
@@ -115,18 +119,18 @@ function generateChannelArtifacts() {
 	echo
 	echo "#################################################################"
 	echo "#######    Generating anchor peer update for Org1MSP   ##########"
-	echo "#################################################################"
+	echo "#################################################################" # 生成org1 anchor peer更新交易
 	$CONFIGTXGEN -profile TwoOrgsChannel -outputAnchorPeersUpdate ./channel-artifacts/Org1MSPanchors.tx -channelID $CHANNEL_NAME -asOrg Org1MSP
 
 	echo
 	echo "#################################################################"
 	echo "#######    Generating anchor peer update for Org2MSP   ##########"
-	echo "#################################################################"
+	echo "#################################################################" # 生成org2 anchor peer更新交易
 	$CONFIGTXGEN -profile TwoOrgsChannel -outputAnchorPeersUpdate ./channel-artifacts/Org2MSPanchors.tx -channelID $CHANNEL_NAME -asOrg Org2MSP
 	echo
 }
 
-generateCerts # 生成MSP服务需要用到的公、私钥和证书
+generateCerts # 生成MSP服务需要用到的公、私钥和证书并存放到文件夹/crypto-artifact下
 generateIdemixMaterial # 该方法不知道干嘛的，有待研究
 replacePrivateKey
 generateChannelArtifacts

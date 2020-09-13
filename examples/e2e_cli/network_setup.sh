@@ -65,9 +65,9 @@ function networkUp () {
     else
       CHANNEL_NAME=$CH_NAME TIMEOUT=$CLI_TIMEOUT docker-compose -f $COMPOSE_FILE up -d 2>&1 # 2>&1 表示将标准错误输出（STDERR）重定向到标准输出（STDOUT）
     fi
-    if [ $? -ne 0 ]; then
-	echo "ERROR !!!! Unable to pull the images "
-	exit 1
+    if [ $? -ne 0 ]; then # 最后运行的命令的结束代码（返回值）
+	    echo "ERROR !!!! Unable to pull the images "
+	    exit 1
     fi
     docker logs -f cli # 跟踪容器cli的日志输出
 }
