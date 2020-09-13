@@ -28,7 +28,7 @@ verifyResult () {
 		echo "!!!!!!!!!!!!!!! "$2" !!!!!!!!!!!!!!!!"
                 echo "================== ERROR !!! FAILED to execute End-2-End Scenario =================="
 		echo
-   		exit 1
+   	exit 1
 	fi
 }
 
@@ -82,6 +82,7 @@ checkOSNAvailability() {
 		 if [ -z "$CORE_PEER_TLS_ENABLED" -o "$CORE_PEER_TLS_ENABLED" = "false" ]; then
 			 peer channel fetch 0 -o orderer.example.com:7050 -c "$ORDERER_SYSCHAN_ID" >&log.txt
 		 else
+		   # 找不到对应输出的0_block.pb文件，是因为输出到容器cli中了。同理log.txt文件也在容器cli中，所以看不到. 需执行命令$ docker exec -it cli bash
 			 peer channel fetch 0 0_block.pb -o orderer.example.com:7050 -c "$ORDERER_SYSCHAN_ID" --tls --cafile $ORDERER_CA >&log.txt
 		 fi
 		 test $? -eq 0 && VALUE=$(cat log.txt | awk '/Received block/ {print $NF}')
@@ -214,7 +215,7 @@ chaincodeQuery () {
         	echo "================== ERROR !!! FAILED to execute End-2-End Scenario =================="
 		echo
 		exit 1
-    	fi
+  fi
 }
 
 # parsePeerConnectionParameters $@
@@ -236,9 +237,9 @@ parsePeerConnectionParameters() {
 		if [ -z "$CORE_PEER_TLS_ENABLED" -o "$CORE_PEER_TLS_ENABLED" = "true" ]; then
         		TLSINFO=$(eval echo "--tlsRootCertFiles \$PEER$1_ORG$2_CA")
         		PEER_CONN_PARMS="$PEER_CONN_PARMS $TLSINFO"
-        	fi
+    fi
 		# shift by two to get the next pair of peer/org parameters
-        	shift; shift
+    shift; shift
 	done
 	# remove leading space for output
 	PEERS="$(echo -e "$PEERS" | sed -e 's/^[[:space:]]*//')"
@@ -257,7 +258,7 @@ chaincodeInvoke () {
 	if [ -z "$CORE_PEER_TLS_ENABLED" -o "$CORE_PEER_TLS_ENABLED" = "false" ]; then
 		peer chaincode invoke -o orderer.example.com:7050 -C $CHANNEL_NAME -n mycc $PEER_CONN_PARMS -c '{"Args":["invoke","a","b","10"]}' >&log.txt
 	else
-        peer chaincode invoke -o orderer.example.com:7050  --tls --cafile $ORDERER_CA -C $CHANNEL_NAME -n mycc $PEER_CONN_PARMS -c '{"Args":["invoke","a","b","10"]}' >&log.txt
+    peer chaincode invoke -o orderer.example.com:7050  --tls --cafile $ORDERER_CA -C $CHANNEL_NAME -n mycc $PEER_CONN_PARMS -c '{"Args":["invoke","a","b","10"]}' >&log.txt
 	fi
 	res=$?
 	cat log.txt
@@ -284,7 +285,7 @@ updateAnchorPeers 0 1
 echo "Updating anchor peers for org2..."
 updateAnchorPeers 0 2
 
-# Install chaincode on peer0.org1 and peer2.org2
+# Install chaincode on peer0.org1 and peer0.org2
 echo "Installing chaincode on peer0.org1..."
 installChaincode 0 1
 echo "Install chaincode on peer0.org2..."
@@ -312,7 +313,7 @@ chaincodeQuery 1 2 90
 
 #Query on chaincode on peer1.org3 with idemix MSP type, check if the result is 90
 echo "Querying chaincode on peer1.org3..."
-chaincodeQuery 1 3 90
+chaincodeQuery 1 3 90 # 出错，可暂时忽略，不清楚idemix MSP作用
 
 echo
 echo "===================== All GOOD, End-2-End execution completed ===================== "
