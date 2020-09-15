@@ -1,10 +1,12 @@
-// Copyright IBM Corp. All Rights Reserved.
-// SPDX-License-Identifier: Apache-2.0
+/*
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
 
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -12,11 +14,14 @@ import (
 
 	"github.com/hyperledger/fabric/common/crypto"
 	"github.com/hyperledger/fabric/common/localmsp"
+	genesisconfig "github.com/hyperledger/fabric/common/tools/configtxgen/localconfig"
 	mspmgmt "github.com/hyperledger/fabric/msp/mgmt"
 	"github.com/hyperledger/fabric/orderer/common/localconfig"
 	cb "github.com/hyperledger/fabric/protos/common"
 	ab "github.com/hyperledger/fabric/protos/orderer"
 	"github.com/hyperledger/fabric/protos/utils"
+
+	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"gopkg.in/cheggaaa/pb.v1"
 )
@@ -52,14 +57,14 @@ func (s *broadcastClient) getAck() error {
 }
 
 func main() {
-	conf, err := localconfig.Load()
+	config, err := config.Load()
 	if err != nil {
 		fmt.Println("failed to load config:", err)
 		os.Exit(1)
 	}
 
 	// Load local MSP
-	err = mspmgmt.LoadLocalMsp(conf.General.LocalMSPDir, conf.General.BCCSP, conf.General.LocalMSPID)
+	err = mspmgmt.LoadLocalMsp(config.General.LocalMSPDir, config.General.BCCSP, config.General.LocalMSPID)
 	if err != nil { // Handle errors reading the config file
 		fmt.Println("Failed to initialize local MSP:", err)
 		os.Exit(0)
@@ -74,8 +79,8 @@ func main() {
 	var msgSize uint64
 	var bar *pb.ProgressBar
 
-	flag.StringVar(&serverAddr, "server", fmt.Sprintf("%s:%d", conf.General.ListenAddress, conf.General.ListenPort), "The RPC server to connect to.")
-	flag.StringVar(&channelID, "channelID", localconfig.Defaults.General.SystemChannel, "The channel ID to broadcast to.")
+	flag.StringVar(&serverAddr, "server", fmt.Sprintf("%s:%d", config.General.ListenAddress, config.General.ListenPort), "The RPC server to connect to.")
+	flag.StringVar(&channelID, "channelID", genesisconfig.TestChainID, "The channel ID to broadcast to.")
 	flag.Uint64Var(&messages, "messages", 1, "The number of messages to broadcast.")
 	flag.Uint64Var(&goroutines, "goroutines", 1, "The number of concurrent go routines to broadcast the messages on")
 	flag.Uint64Var(&msgSize, "size", 1024, "The size in bytes of the data section for the payload")

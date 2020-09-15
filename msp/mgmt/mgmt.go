@@ -1,7 +1,17 @@
 /*
-Copyright IBM Corp. All Rights Reserved.
+Copyright IBM Corp. 2017 All Rights Reserved.
 
-SPDX-License-Identifier: Apache-2.0
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+		 http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
 
 package mgmt
@@ -12,6 +22,7 @@ import (
 
 	"github.com/hyperledger/fabric/bccsp/factory"
 	"github.com/hyperledger/fabric/common/flogging"
+	"github.com/hyperledger/fabric/core/config"
 	"github.com/hyperledger/fabric/msp"
 	"github.com/hyperledger/fabric/msp/cache"
 	"github.com/pkg/errors"
@@ -44,6 +55,16 @@ func LoadLocalMsp(dir string, bccspConfig *factory.FactoryOpts, mspID string) er
 	}
 
 	return GetLocalMSP().Setup(conf)
+}
+
+// Loads the development local MSP for use in testing.  Not valid for production/runtime context
+func LoadDevMsp() error {
+	mspDir, err := config.GetDevMspDir()
+	if err != nil {
+		return err
+	}
+
+	return LoadLocalMsp(mspDir, nil, "DEFAULT")
 }
 
 // FIXME: AS SOON AS THE CHAIN MANAGEMENT CODE IS COMPLETE,
@@ -131,53 +152,61 @@ func XXXSetMSPManager(chainID string, manager msp.MSPManager) {
 
 // GetLocalMSP returns the local msp (and creates it if it doesn't exist)
 func GetLocalMSP() msp.MSP {
-	m.Lock()
-	defer m.Unlock()
-
-	if localMsp != nil {
-		return localMsp
-	}
-
-	localMsp = loadLocaMSP()
-
-	return localMsp
-}
-
-func loadLocaMSP() msp.MSP {
-	// determine the type of MSP (by default, we'll use bccspMSP)
-	mspType := viper.GetString("peer.localMspType")
-	if mspType == "" {
-		mspType = msp.ProviderTypeToString(msp.FABRIC)
-	}
-
-	var mspOpts = map[string]msp.NewOpts{
-		msp.ProviderTypeToString(msp.FABRIC): &msp.BCCSPNewOpts{NewBaseOpts: msp.NewBaseOpts{Version: msp.MSPv1_0}},
-		msp.ProviderTypeToString(msp.IDEMIX): &msp.IdemixNewOpts{NewBaseOpts: msp.NewBaseOpts{Version: msp.MSPv1_1}},
-	}
-	newOpts, found := mspOpts[mspType]
-	if !found {
-		mspLogger.Panicf("msp type " + mspType + " unknown")
-	}
-
-	mspInst, err := msp.New(newOpts)
-	if err != nil {
-		mspLogger.Fatalf("Failed to initialize local MSP, received err %+v", err)
-	}
-	switch mspType {
-	case msp.ProviderTypeToString(msp.FABRIC):
-		mspInst, err = cache.New(mspInst)
-		if err != nil {
-			mspLogger.Fatalf("Failed to initialize local MSP, received err %+v", err)
+	var lclMsp msp.MSP
+	var created bool = false
+	{
+		// determine the type of MSP (by default, we'll use bccspMSP)
+		mspType := viper.GetString("peer.localMspType")
+		if mspType == "" {
+			mspType = msp.ProviderTypeToString(msp.FABRIC)
 		}
-	case msp.ProviderTypeToString(msp.IDEMIX):
-		// Do nothing
-	default:
-		panic("msp type " + mspType + " unknown")
+
+		// based on the MSP type, generate the new opts
+		var newOpts msp.NewOpts
+		switch mspType {
+		case msp.ProviderTypeToString(msp.FABRIC):
+			newOpts = &msp.BCCSPNewOpts{NewBaseOpts: msp.NewBaseOpts{Version: msp.MSPv1_0}}
+		case msp.ProviderTypeToString(msp.IDEMIX):
+			newOpts = &msp.IdemixNewOpts{msp.NewBaseOpts{Version: msp.MSPv1_1}}
+		default:
+			panic("msp type " + mspType + " unknown")
+		}
+
+		m.Lock()
+		defer m.Unlock()
+
+		lclMsp = localMsp
+		if lclMsp == nil {
+			var err error
+			created = true
+
+			mspInst, err := msp.New(newOpts)
+			if err != nil {
+				mspLogger.Fatalf("Failed to initialize local MSP, received err %+v", err)
+			}
+
+			switch mspType {
+			case msp.ProviderTypeToString(msp.FABRIC):
+				lclMsp, err = cache.New(mspInst)
+				if err != nil {
+					mspLogger.Fatalf("Failed to initialize local MSP, received err %+v", err)
+				}
+			case msp.ProviderTypeToString(msp.IDEMIX):
+				lclMsp = mspInst
+			default:
+				panic("msp type " + mspType + " unknown")
+			}
+			localMsp = lclMsp
+		}
 	}
 
-	mspLogger.Debugf("Created new local MSP")
+	if created {
+		mspLogger.Debugf("Created new local MSP")
+	} else {
+		mspLogger.Debugf("Returning existing local MSP")
+	}
 
-	return mspInst
+	return lclMsp
 }
 
 // GetIdentityDeserializer returns the IdentityDeserializer for the given chain

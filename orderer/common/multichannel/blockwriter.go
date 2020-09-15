@@ -9,7 +9,6 @@ package multichannel
 import (
 	"sync"
 
-	"github.com/golang/protobuf/proto"
 	newchannelconfig "github.com/hyperledger/fabric/common/channelconfig"
 	"github.com/hyperledger/fabric/common/configtx"
 	"github.com/hyperledger/fabric/common/crypto"
@@ -17,6 +16,8 @@ import (
 	"github.com/hyperledger/fabric/common/util"
 	cb "github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/utils"
+
+	"github.com/golang/protobuf/proto"
 )
 
 type blockWriterSupport interface {

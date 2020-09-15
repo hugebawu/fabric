@@ -9,6 +9,8 @@ package peer
 import (
 	"fmt"
 
+	"github.com/hyperledger/fabric/common/channelconfig"
+	"github.com/hyperledger/fabric/common/resourcesconfig"
 	"github.com/hyperledger/fabric/core/ledger"
 	"github.com/hyperledger/fabric/core/ledger/customtx"
 	"github.com/hyperledger/fabric/protos/common"
@@ -16,8 +18,9 @@ import (
 )
 
 const (
-	channelConfigKey = "resourcesconfigtx.CHANNEL_CONFIG_KEY"
-	peerNamespace    = ""
+	resourcesConfigKey = "resourcesconfigtx.RESOURCES_CONFIG_KEY"
+	channelConfigKey   = "resourcesconfigtx.CHANNEL_CONFIG_KEY"
+	peerNamespace      = ""
 )
 
 // txProcessor implements the interface 'github.com/hyperledger/fabric/core/ledger/customtx/Processor'
@@ -40,19 +43,26 @@ func newConfigTxProcessor() customtx.Processor {
 func (tp *configtxProcessor) GenerateSimulationResults(txEnv *common.Envelope, simulator ledger.TxSimulator, initializingLedger bool) error {
 	payload := utils.UnmarshalPayloadOrPanic(txEnv.Payload)
 	channelHdr := utils.UnmarshalChannelHeaderOrPanic(payload.Header.ChannelHeader)
+	chainid := channelHdr.ChannelId
 	txType := common.HeaderType(channelHdr.GetType())
 
 	switch txType {
 	case common.HeaderType_CONFIG:
 		peerLogger.Debugf("Processing CONFIG")
-		return processChannelConfigTx(txEnv, simulator)
+		return processChannelConfigTx(chainid, txEnv, simulator)
 
+	case common.HeaderType_PEER_RESOURCE_UPDATE:
+		peerLogger.Debugf("Processing PEER_RESOURCE_UPDATE")
+		if initializingLedger {
+			return processResourceConfigTxDuringInitialization(chainid, txEnv, simulator)
+		}
+		return processResourceConfigTx(chainid, txEnv, simulator)
 	default:
 		return fmt.Errorf("tx type [%s] is not expected", txType)
 	}
 }
 
-func processChannelConfigTx(txEnv *common.Envelope, simulator ledger.TxSimulator) error {
+func processChannelConfigTx(chainid string, txEnv *common.Envelope, simulator ledger.TxSimulator) error {
 	configEnvelope := &common.ConfigEnvelope{}
 	if _, err := utils.UnmarshalEnvelopeOfType(txEnv, common.HeaderType_CONFIG, configEnvelope); err != nil {
 		return err
@@ -67,8 +77,61 @@ func processChannelConfigTx(txEnv *common.Envelope, simulator ledger.TxSimulator
 	if channelConfig == nil {
 		return fmt.Errorf("Channel config found nil")
 	}
+	resConfCapabilityOn, err := isResConfigCapabilityOn(chainid, channelConfig)
+	if err != nil {
+		return err
+	}
+	resourceConfigSeed, err := extractFullConfigFromSeedTx(configEnvelope)
+	if err != nil {
+		return err
+	}
+
+	if channelConfig.Sequence == 1 && resConfCapabilityOn {
+		if resourceConfigSeed == nil {
+			return fmt.Errorf("Resource config cannot be nil in the genesis ('CONFIG') transaction")
+		}
+		return persistConf(simulator, resourcesConfigKey, resourceConfigSeed)
+	}
 
 	return nil
+}
+
+func processResourceConfigTx(chainid string, txEnv *common.Envelope, simulator ledger.TxSimulator) error {
+	fullResConf, err := validateAndApplyResourceConfig(chainid, txEnv)
+	if err != nil {
+		return err
+	}
+	return persistConf(simulator, resourcesConfigKey, fullResConf)
+}
+
+func processResourceConfigTxDuringInitialization(chainid string, txEnv *common.Envelope, simulator ledger.TxSimulator) error {
+	var existingResConf, existingChanConf, updatedResConf *common.Config
+	var err error
+
+	if existingResConf, err = retrievePersistedConf(simulator, resourcesConfigKey); err != nil {
+		return err
+	}
+	if existingChanConf, err = retrievePersistedConf(simulator, channelConfigKey); err != nil {
+		return err
+	}
+
+	if existingResConf == nil || existingChanConf == nil {
+		return fmt.Errorf("Channel config or resource config should not be nil")
+	}
+
+	chanConfigBundle, err := channelconfig.NewBundle(chainid, existingChanConf)
+	if err != nil {
+		return err
+	}
+
+	resConfigBundle, err := resourcesconfig.NewBundle(chainid, existingResConf, chanConfigBundle)
+	if err != nil {
+		return err
+	}
+	if updatedResConf, err = computeFullConfig(resConfigBundle, txEnv); err != nil {
+		return err
+	}
+	return persistConf(simulator, resourcesConfigKey, updatedResConf)
 }
 
 func persistConf(simulator ledger.TxSimulator, key string, config *common.Config) error {

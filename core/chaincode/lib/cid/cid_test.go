@@ -108,7 +108,7 @@ func TestClient(t *testing.T) {
 
 func getMockStub() (cid.ChaincodeStubInterface, error) {
 	stub := &mockStub{}
-	sid := &msp.SerializedIdentity{Mspid: "SampleOrg",
+	sid := &msp.SerializedIdentity{Mspid: "DEFAULT",
 		IdBytes: []byte(certWithOutAttrs)}
 	b, err := proto.Marshal(sid)
 	if err != nil {
@@ -120,7 +120,7 @@ func getMockStub() (cid.ChaincodeStubInterface, error) {
 
 func getMockStubWithAttrs() (cid.ChaincodeStubInterface, error) {
 	stub := &mockStub{}
-	sid := &msp.SerializedIdentity{Mspid: "SampleOrg",
+	sid := &msp.SerializedIdentity{Mspid: "DEFAULT",
 		IdBytes: []byte(certWithAttrs)}
 	b, err := proto.Marshal(sid)
 	if err != nil {

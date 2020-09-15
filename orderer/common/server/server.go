@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/hyperledger/fabric/common/crypto"
 	"github.com/hyperledger/fabric/common/deliver"
-	"github.com/hyperledger/fabric/common/metrics"
 	"github.com/hyperledger/fabric/common/policies"
 	"github.com/hyperledger/fabric/orderer/common/broadcast"
 	localconfig "github.com/hyperledger/fabric/orderer/common/localconfig"
@@ -38,47 +38,40 @@ type deliverSupport struct {
 	*multichannel.Registrar
 }
 
-func (ds deliverSupport) GetChain(chainID string) deliver.Chain {
-	chain := ds.Registrar.GetChain(chainID)
-	if chain == nil {
-		return nil
-	}
-	return chain
+func (ds deliverSupport) GetChain(chainID string) (deliver.Support, bool) {
+	return ds.Registrar.GetChain(chainID)
 }
 
 type server struct {
-	bh    *broadcast.Handler
-	dh    *deliver.Handler
+	bh    broadcast.Handler
+	dh    deliver.Handler
 	debug *localconfig.Debug
 	*multichannel.Registrar
 }
 
-type responseSender struct {
+type deliverHandlerSupport struct {
 	ab.AtomicBroadcast_DeliverServer
 }
 
-func (rs *responseSender) SendStatusResponse(status cb.Status) error {
-	reply := &ab.DeliverResponse{
+// CreateStatusReply generates status reply proto message
+func (*deliverHandlerSupport) CreateStatusReply(status cb.Status) proto.Message {
+	return &ab.DeliverResponse{
 		Type: &ab.DeliverResponse_Status{Status: status},
 	}
-	return rs.Send(reply)
 }
 
-func (rs *responseSender) SendBlockResponse(block *cb.Block) error {
-	response := &ab.DeliverResponse{
+// CreateBlockReply generates deliver response with block message
+func (*deliverHandlerSupport) CreateBlockReply(block *cb.Block) proto.Message {
+	return &ab.DeliverResponse{
 		Type: &ab.DeliverResponse_Block{Block: block},
 	}
-	return rs.Send(response)
 }
 
 // NewServer creates an ab.AtomicBroadcastServer based on the broadcast target and ledger Reader
-func NewServer(r *multichannel.Registrar, metricsProvider metrics.Provider, debug *localconfig.Debug, timeWindow time.Duration, mutualTLS bool) ab.AtomicBroadcastServer {
+func NewServer(r *multichannel.Registrar, _ crypto.LocalSigner, debug *localconfig.Debug, timeWindow time.Duration, mutualTLS bool) ab.AtomicBroadcastServer {
 	s := &server{
-		dh: deliver.NewHandler(deliverSupport{Registrar: r}, timeWindow, mutualTLS, deliver.NewMetrics(metricsProvider)),
-		bh: &broadcast.Handler{
-			SupportRegistrar: broadcastSupport{Registrar: r},
-			Metrics:          broadcast.NewMetrics(metricsProvider),
-		},
+		dh:        deliver.NewHandlerImpl(deliverSupport{Registrar: r}, timeWindow, mutualTLS),
+		bh:        broadcast.NewHandlerImpl(broadcastSupport{Registrar: r}),
 		debug:     debug,
 		Registrar: r,
 	}
@@ -125,12 +118,12 @@ func (bmt *broadcastMsgTracer) Recv() (*cb.Envelope, error) {
 }
 
 type deliverMsgTracer struct {
-	deliver.Receiver
+	deliver.DeliverSupport
 	msgTracer
 }
 
 func (dmt *deliverMsgTracer) Recv() (*cb.Envelope, error) {
-	msg, err := dmt.Receiver.Recv()
+	msg, err := dmt.DeliverSupport.Recv()
 	if traceDir := dmt.debug.DeliverTraceDir; traceDir != "" {
 		dmt.trace(traceDir, msg, err)
 	}
@@ -164,29 +157,22 @@ func (s *server) Deliver(srv ab.AtomicBroadcast_DeliverServer) error {
 		}
 		logger.Debugf("Closing Deliver stream")
 	}()
-
 	policyChecker := func(env *cb.Envelope, channelID string) error {
-		chain := s.GetChain(channelID)
-		if chain == nil {
+		chain, ok := s.GetChain(channelID)
+		if !ok {
 			return errors.Errorf("channel %s not found", channelID)
 		}
 		sf := msgprocessor.NewSigFilter(policies.ChannelReaders, chain)
 		return sf.Apply(env)
 	}
-	deliverServer := &deliver.Server{
-		PolicyChecker: deliver.PolicyCheckerFunc(policyChecker),
-		Receiver: &deliverMsgTracer{
-			Receiver: srv,
-			msgTracer: msgTracer{
-				debug:    s.debug,
-				function: "Deliver",
-			},
-		},
-		ResponseSender: &responseSender{
-			AtomicBroadcast_DeliverServer: srv,
+	server := &deliverMsgTracer{
+		DeliverSupport: &deliverHandlerSupport{AtomicBroadcast_DeliverServer: srv},
+		msgTracer: msgTracer{
+			debug:    s.debug,
+			function: "Deliver",
 		},
 	}
-	return s.dh.Handle(srv.Context(), deliverServer)
+	return s.dh.Handle(deliver.NewDeliverServer(server, policyChecker, s.sendProducer(srv)))
 }
 
 func (s *server) sendProducer(srv ab.AtomicBroadcast_DeliverServer) func(msg proto.Message) error {

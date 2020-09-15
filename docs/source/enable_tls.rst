@@ -127,9 +127,7 @@ Debugging TLS issues
 
 Before debugging TLS issues, it is advisable to enable ``GRPC debug`` on both the TLS client
 and the server side to get additional information. To enable ``GRPC debug``, set the
-environment variable ``FABRIC_LOGGING_SPEC`` to include ``grpc=debug``. For example, to
-set the default logging level to ``INFO`` and the GRPC logging level to ``DEBUG``, set
-the logging specification to ``grpc=debug:info``.
+environment variable ``CORE_LOGGING_GRPC`` to ``DEBUG``.
 
 If you see the error message ``remote error: tls: bad certificate`` on the client side, it
 usually means that the TLS server has enabled client authentication and the server either did
@@ -141,7 +139,8 @@ If you see the error message ``remote error: tls: bad certificate`` in your chai
 ensure that your chaincode has been built using the chaincode shim provided with Fabric v1.1
 or newer. If your chaincode does not contain a vendored copy of the shim, deleting the
 chaincode container and restarting its peer will rebuild the chaincode container using the
-current shim version.
+current shim version. If your chaincode vendored a previous version of the shim, review the
+documentation on how to :ref:`upgrade-vendored-shim`.
 
 .. Licensed under Creative Commons Attribution 4.0 International License
    https://creativecommons.org/licenses/by/4.0/

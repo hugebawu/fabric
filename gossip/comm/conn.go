@@ -7,7 +7,6 @@ SPDX-License-Identifier: Apache-2.0
 package comm
 
 import (
-	"context"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -15,8 +14,9 @@ import (
 	"github.com/hyperledger/fabric/gossip/common"
 	"github.com/hyperledger/fabric/gossip/util"
 	proto "github.com/hyperledger/fabric/protos/gossip"
+	"github.com/op/go-logging"
 	"github.com/pkg/errors"
-	"go.uber.org/zap/zapcore"
+	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
 
@@ -34,7 +34,7 @@ type connFactory interface {
 }
 
 type connectionStore struct {
-	logger           util.Logger            // logger
+	logger           *logging.Logger        // logger
 	isClosing        bool                   // whether this connection store is shutting down
 	connFactory      connFactory            // creates a connection to remote peer
 	sync.RWMutex                            // synchronize access to shared variables
@@ -43,7 +43,7 @@ type connectionStore struct {
 	// used to prevent concurrent connection establishment to the same remote endpoint
 }
 
-func newConnStore(connFactory connFactory, logger util.Logger) *connectionStore {
+func newConnStore(connFactory connFactory, logger *logging.Logger) *connectionStore {
 	return &connectionStore{
 		connFactory:      connFactory,
 		isClosing:        false,
@@ -207,7 +207,7 @@ type connection struct {
 	cancel       context.CancelFunc
 	info         *proto.ConnectionInfo
 	outBuff      chan *msgSending
-	logger       util.Logger                     // logger
+	logger       *logging.Logger                 // logger
 	pkiID        common.PKIidType                // pkiID of the remote endpoint
 	handler      handler                         // function to invoke upon a message reception
 	conn         *grpc.ClientConn                // gRPC connection to remote endpoint
@@ -256,34 +256,36 @@ func (conn *connection) send(msg *proto.SignedGossipMessage, onErr func(error), 
 		conn.logger.Debug("Aborting send() to ", conn.info.Endpoint, "because connection is closing")
 		return
 	}
+	conn.Lock()
+	defer conn.Unlock()
 
 	m := &msgSending{
 		envelope: msg.Envelope,
 		onErr:    onErr,
 	}
 
-	if len(conn.outBuff) == cap(conn.outBuff) {
-		if conn.logger.IsEnabledFor(zapcore.DebugLevel) {
+	if len(conn.outBuff) == util.GetIntOrDefault("peer.gossip.sendBuffSize", defSendBuffSize) {
+		if conn.logger.IsEnabledFor(logging.DEBUG) {
 			conn.logger.Debug("Buffer to", conn.info.Endpoint, "overflowed, dropping message", msg.String())
 		}
 		if !shouldBlock {
 			return
 		}
 	}
-
 	conn.outBuff <- m
 }
 
 func (conn *connection) serviceConnection() error {
 	errChan := make(chan error, 1)
 	msgChan := make(chan *proto.SignedGossipMessage, util.GetIntOrDefault("peer.gossip.recvBuffSize", defRecvBuffSize))
-	quit := make(chan struct{})
+	defer close(msgChan)
+
 	// Call stream.Recv() asynchronously in readFromStream(),
 	// and wait for either the Recv() call to end,
 	// or a signal to close the connection, which exits
 	// the method and makes the Recv() call to fail in the
 	// readFromStream() method
-	go conn.readFromStream(errChan, quit, msgChan)
+	go conn.readFromStream(errChan, msgChan)
 
 	go conn.writeToStream()
 
@@ -331,7 +333,10 @@ func (conn *connection) drainOutputBuffer() {
 	}
 }
 
-func (conn *connection) readFromStream(errChan chan error, quit chan struct{}, msgChan chan *proto.SignedGossipMessage) {
+func (conn *connection) readFromStream(errChan chan error, msgChan chan *proto.SignedGossipMessage) {
+	defer func() {
+		recover()
+	}() // msgChan might be closed
 	for !conn.toDie() {
 		stream := conn.getStream()
 		if stream == nil {
@@ -346,20 +351,15 @@ func (conn *connection) readFromStream(errChan chan error, quit chan struct{}, m
 		}
 		if err != nil {
 			errChan <- err
-			conn.logger.Debugf("Got error, aborting: %v", err)
+			conn.logger.Debugf("%v Got error, aborting: %v", err)
 			return
 		}
 		msg, err := envelope.ToGossipMessage()
 		if err != nil {
 			errChan <- err
-			conn.logger.Warningf("Got error, aborting: %v", err)
-			return
+			conn.logger.Warning("%v Got error, aborting: %v", err)
 		}
-		select {
-		case msgChan <- msg:
-		case <-quit:
-			return
-		}
+		msgChan <- msg
 	}
 }
 
@@ -386,10 +386,4 @@ func (conn *connection) getStream() stream {
 type msgSending struct {
 	envelope *proto.Envelope
 	onErr    func(error)
-}
-
-//go:generate mockery -dir . -name MockStream -case underscore -output mocks/
-
-type MockStream interface {
-	proto.Gossip_GossipStreamClient
 }

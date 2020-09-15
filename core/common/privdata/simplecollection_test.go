@@ -33,10 +33,6 @@ type mockIdentity struct {
 	idBytes []byte
 }
 
-func (id *mockIdentity) Anonymous() bool {
-	panic("implement me")
-}
-
 func (id *mockIdentity) ExpiresAt() time.Time {
 	return time.Time{}
 }

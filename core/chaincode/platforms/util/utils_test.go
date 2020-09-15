@@ -1,7 +1,17 @@
 /*
-Copyright IBM Corp. All Rights Reserved.
+Copyright IBM Corp. 2016 All Rights Reserved.
 
-SPDX-License-Identifier: Apache-2.0
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+		 http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
 
 package util
@@ -21,7 +31,7 @@ import (
 	"time"
 
 	"github.com/hyperledger/fabric/common/util"
-	"github.com/hyperledger/fabric/core/config/configtest"
+	"github.com/hyperledger/fabric/core/config"
 	cutil "github.com/hyperledger/fabric/core/container/util"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -236,7 +246,7 @@ func TestHashBadWriter(t *testing.T) {
 		"HashFilesInDir invoked with closed writer, should have failed")
 }
 
-// TestHashNonExistentDir tests HashFilesInDir with non existent directory
+// TestHashNonExistentDir tests HashFilesInDir with non existant directory
 func TestHashNonExistentDir(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping TestHashNonExistentDir")
@@ -329,7 +339,6 @@ func createTempFile(t *testing.T) string {
 	return tmpfile.Name()
 }
 
-// TODO restore this test once multi-arch has been established
 func TestDockerPull(t *testing.T) {
 	codepackage, output := io.Pipe()
 	go func() {
@@ -341,7 +350,7 @@ func TestDockerPull(t *testing.T) {
 
 	binpackage := bytes.NewBuffer(nil)
 
-	// Perform a nop operation within a fixed target.  We choose 1.1.0 because we know it's
+	// Perform a nop operation within a fixed target.  We choose 1.0.0-alpha2 because we know it's
 	// published and available.  Ideally we could choose something that we know is both multi-arch
 	// and ok to delete prior to executing DockerBuild.  This would ensure that we exercise the
 	// image pull logic.  However, no suitable target exists that meets all the criteria.  Therefore
@@ -353,7 +362,7 @@ func TestDockerPull(t *testing.T) {
 	// Future considerations: publish a known dummy image that is multi-arch and free to randomly
 	// delete, and use that here instead.
 	err := DockerBuild(DockerBuildOptions{
-		Image:        cutil.ParseDockerfileTemplate("hyperledger/fabric-ccenv:$(ARCH)-1.1.0"),
+		Image:        cutil.ParseDockerfileTemplate("hyperledger/fabric-ccenv:$(ARCH)-1.0.0-alpha2"),
 		Cmd:          "/bin/true",
 		InputStream:  codepackage,
 		OutputStream: binpackage,
@@ -366,7 +375,7 @@ func TestDockerPull(t *testing.T) {
 func TestMain(m *testing.M) {
 	viper.SetConfigName("core")
 	viper.SetEnvPrefix("CORE")
-	configtest.AddDevConfigPath(nil)
+	config.AddDevConfigPath(nil)
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()
 	if err := viper.ReadInConfig(); err != nil {

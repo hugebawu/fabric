@@ -1,32 +1,41 @@
 /*
-Copyright IBM Corp. All Rights Reserved.
+Copyright IBM Corp. 2016 All Rights Reserved.
 
-SPDX-License-Identifier: Apache-2.0
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+		 http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
 
 package ledgermgmt
 
 import (
-	"bytes"
+	"errors"
 	"sync"
 
-	"github.com/hyperledger/fabric/common/flogging"
-	"github.com/hyperledger/fabric/common/metrics"
-	"github.com/hyperledger/fabric/core/chaincode/platforms"
-	"github.com/hyperledger/fabric/core/common/ccprovider"
-	"github.com/hyperledger/fabric/core/ledger"
 	"github.com/hyperledger/fabric/core/ledger/cceventmgmt"
+
+	"fmt"
+
+	"github.com/hyperledger/fabric/common/flogging"
+	"github.com/hyperledger/fabric/core/ledger"
 	"github.com/hyperledger/fabric/core/ledger/customtx"
 	"github.com/hyperledger/fabric/core/ledger/kvledger"
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/utils"
-	"github.com/pkg/errors"
 )
 
 var logger = flogging.MustGetLogger("ledgermgmt")
 
 // ErrLedgerAlreadyOpened is thrown by a CreateLedger call if a ledger with the given id is already opened
-var ErrLedgerAlreadyOpened = errors.New("ledger already opened")
+var ErrLedgerAlreadyOpened = errors.New("Ledger already opened")
 
 // ErrLedgerMgmtNotInitialized is thrown when ledger mgmt is used before initializing this
 var ErrLedgerMgmtNotInitialized = errors.New("ledger mgmt should be initialized before using")
@@ -37,44 +46,26 @@ var lock sync.Mutex
 var initialized bool
 var once sync.Once
 
-// Initializer encapsulates all the external dependencies for the ledger module
-type Initializer struct {
-	CustomTxProcessors            customtx.Processors
-	PlatformRegistry              *platforms.Registry
-	DeployedChaincodeInfoProvider ledger.DeployedChaincodeInfoProvider
-	MembershipInfoProvider        ledger.MembershipInfoProvider
-	MetricsProvider               metrics.Provider
-}
-
 // Initialize initializes ledgermgmt
-func Initialize(initializer *Initializer) {
+func Initialize(customTxProcessors customtx.Processors) {
 	once.Do(func() {
-		initialize(initializer)
+		initialize(customTxProcessors)
 	})
 }
 
-func initialize(initializer *Initializer) {
+func initialize(customTxProcessors customtx.Processors) {
 	logger.Info("Initializing ledger mgmt")
 	lock.Lock()
 	defer lock.Unlock()
 	initialized = true
 	openedLedgers = make(map[string]ledger.PeerLedger)
-	customtx.Initialize(initializer.CustomTxProcessors)
-	cceventmgmt.Initialize(&chaincodeInfoProviderImpl{
-		initializer.PlatformRegistry,
-		initializer.DeployedChaincodeInfoProvider,
-	})
-	finalStateListeners := addListenerForCCEventsHandler(initializer.DeployedChaincodeInfoProvider, []ledger.StateListener{})
+	customtx.Initialize(customTxProcessors)
+	cceventmgmt.Initialize()
 	provider, err := kvledger.NewProvider()
 	if err != nil {
-		panic(errors.WithMessage(err, "Error in instantiating ledger provider"))
+		panic(fmt.Errorf("Error in instantiating ledger provider: %s", err))
 	}
-	provider.Initialize(&ledger.Initializer{
-		StateListeners:                finalStateListeners,
-		DeployedChaincodeInfoProvider: initializer.DeployedChaincodeInfoProvider,
-		MembershipInfoProvider:        initializer.MembershipInfoProvider,
-		MetricsProvider:               initializer.MetricsProvider,
-	})
+	provider.Initialize(kvLedgerStateListeners)
 	ledgerProvider = provider
 	logger.Info("ledger mgmt initialized")
 }
@@ -172,49 +163,4 @@ func (l *closableLedger) Close() {
 func (l *closableLedger) closeWithoutLock() {
 	l.PeerLedger.Close()
 	delete(openedLedgers, l.id)
-}
-
-// lscc namespace listener for chaincode instantiate transactions (which manipulates data in 'lscc' namespace)
-// this code should be later moved to peer and passed via `Initialize` function of ledgermgmt
-func addListenerForCCEventsHandler(
-	deployedCCInfoProvider ledger.DeployedChaincodeInfoProvider,
-	stateListeners []ledger.StateListener) []ledger.StateListener {
-	return append(stateListeners, &cceventmgmt.KVLedgerLSCCStateListener{DeployedChaincodeInfoProvider: deployedCCInfoProvider})
-}
-
-// chaincodeInfoProviderImpl implements interface cceventmgmt.ChaincodeInfoProvider
-type chaincodeInfoProviderImpl struct {
-	pr                     *platforms.Registry
-	deployedCCInfoProvider ledger.DeployedChaincodeInfoProvider
-}
-
-// GetDeployedChaincodeInfo implements function in the interface cceventmgmt.ChaincodeInfoProvider
-func (p *chaincodeInfoProviderImpl) GetDeployedChaincodeInfo(chainid string,
-	chaincodeDefinition *cceventmgmt.ChaincodeDefinition) (*ledger.DeployedChaincodeInfo, error) {
-	lock.Lock()
-	ledger := openedLedgers[chainid]
-	lock.Unlock()
-	if ledger == nil {
-		return nil, errors.Errorf("Ledger not opened [%s]", chainid)
-	}
-	qe, err := ledger.NewQueryExecutor()
-	if err != nil {
-		return nil, err
-	}
-	defer qe.Done()
-	deployedChaincodeInfo, err := p.deployedCCInfoProvider.ChaincodeInfo(chaincodeDefinition.Name, qe)
-	if err != nil || deployedChaincodeInfo == nil {
-		return nil, err
-	}
-	if deployedChaincodeInfo.Version != chaincodeDefinition.Version ||
-		!bytes.Equal(deployedChaincodeInfo.Hash, chaincodeDefinition.Hash) {
-		// if the deployed chaincode with the given name has different version or different hash, return nil
-		return nil, nil
-	}
-	return deployedChaincodeInfo, nil
-}
-
-// RetrieveChaincodeArtifacts implements function in the interface cceventmgmt.ChaincodeInfoProvider
-func (p *chaincodeInfoProviderImpl) RetrieveChaincodeArtifacts(chaincodeDefinition *cceventmgmt.ChaincodeDefinition) (installed bool, dbArtifactsTar []byte, err error) {
-	return ccprovider.ExtractStatedbArtifactsForChaincode(chaincodeDefinition.Name, chaincodeDefinition.Version, p.pr)
 }

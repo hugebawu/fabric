@@ -102,10 +102,6 @@ func newNoopIdentity() (m.Identity, error) {
 	return &noopidentity{}, nil
 }
 
-func (id *noopidentity) Anonymous() bool {
-	panic("implement me")
-}
-
 func (id *noopidentity) SatisfiesPrincipal(*msp.MSPPrincipal) error {
 	return nil
 }

@@ -12,17 +12,9 @@ import (
 // You need call pool.Stop() after work
 func StartPool(pbs ...*ProgressBar) (pool *Pool, err error) {
 	pool = new(Pool)
-	if err = pool.Start(); err != nil {
+	if err = pool.start(); err != nil {
 		return
 	}
-	pool.Add(pbs...)
-	return
-}
-
-// NewPool initialises a pool with progress bars, but
-// doesn't start it. You need to call Start manually
-func NewPool(pbs ...*ProgressBar) (pool *Pool) {
-	pool = new(Pool)
 	pool.Add(pbs...)
 	return
 }
@@ -32,8 +24,7 @@ type Pool struct {
 	RefreshRate   time.Duration
 	bars          []*ProgressBar
 	lastBarsCount int
-	shutdownCh    chan struct{}
-	workerCh      chan struct{}
+	quit          chan int
 	m             sync.Mutex
 	finishOnce    sync.Once
 }
@@ -50,38 +41,30 @@ func (p *Pool) Add(pbs ...*ProgressBar) {
 	}
 }
 
-func (p *Pool) Start() (err error) {
+func (p *Pool) start() (err error) {
 	p.RefreshRate = DefaultRefreshRate
-	p.shutdownCh, err = lockEcho()
+	quit, err := lockEcho()
 	if err != nil {
 		return
 	}
-	p.workerCh = make(chan struct{})
-	go p.writer()
+	p.quit = make(chan int)
+	go p.writer(quit)
 	return
 }
 
-func (p *Pool) writer() {
+func (p *Pool) writer(finish chan int) {
 	var first = true
-	defer func() {
-		if first == false {
-			p.print(false)
-		} else {
-			p.print(true)
-			p.print(false)
-		}
-		close(p.workerCh)
-	}()
-
 	for {
 		select {
 		case <-time.After(p.RefreshRate):
 			if p.print(first) {
 				p.print(false)
+				finish <- 1
 				return
 			}
 			first = false
-		case <-p.shutdownCh:
+		case <-p.quit:
+			finish <- 1
 			return
 		}
 	}
@@ -89,14 +72,11 @@ func (p *Pool) writer() {
 
 // Restore terminal state and close pool
 func (p *Pool) Stop() error {
+	// Wait until one final refresh has passed.
+	time.Sleep(p.RefreshRate)
+
 	p.finishOnce.Do(func() {
-		close(p.shutdownCh)
+		close(p.quit)
 	})
-
-	// Wait for the worker to complete
-	select {
-	case <-p.workerCh:
-	}
-
 	return unlockEcho()
 }

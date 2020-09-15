@@ -54,7 +54,7 @@ verification. These parameters are deduced by
   to request changes to this MSP configuration (e.g. root CAs, intermediate CAs)
 - A list of Organizational Units that valid members of this MSP should
   include in their X.509 certificate; this is an optional configuration
-  parameter, used when, e.g., multiple organizations leverage the same
+  parameter, used when, e.g., multiple organisations leverage the same
   root of trust, and intermediate CAs, and have reserved an OU field for
   their members
 - A list of certificate revocation lists (CRLs) each corresponding to
@@ -95,7 +95,7 @@ How to generate MSP certificates and their signing keys?
 --------------------------------------------------------
 
 To generate X.509 certificates to feed its MSP configuration, the application
-can use `Openssl <https://www.openssl.org/>`_. We emphasize that in Hyperledger
+can use `Openssl <https://www.openssl.org/>`_. We emphasise that in Hyperledger
 Fabric there is no support for certificates including RSA keys.
 
 Alternatively one can use ``cryptogen`` tool, whose operation is explained in
@@ -192,12 +192,11 @@ needs to be set appropriately. Here is an example:
 As shown above, the ``NodeOUs.Enable`` is set to ``true``, this enables the identify classification.
 Then, client (peer) identifiers are defined by setting the following properties
 for the ``NodeOUs.ClientOUIdentifier`` (``NodeOUs.PeerOUIdentifier``) key:
-
-a. ``OrganizationalUnitIdentifier``: Set this to the value that matches the OU that
-   the x509 certificate of a client (peer) should contain.
-b. ``Certificate``: Set this to the CA or intermediate CA under which client (peer) identities
-   should be validated. The field is relative to the MSP root folder. It can be empty, meaning
-   that the identity's x509 certificate can be validated under any CA defined in the MSP configuration.
+ a. ``OrganizationalUnitIdentifier``: Set this to the value that matches the OU that
+ the x509 certificate of a client (peer) should contain.
+ b. ``Certificate``: Set this to the CA or intermediate CA under which client (peer) identities
+ should be validated. The field is relative to the MSP root folder. It can be empty, meaning
+ that the identity's x509 certificate can be validated under any CA defined in the MSP configuration.
 
 When the classification is enabled, MSP administrators need
 to be clients of that MSP, meaning that their x509 certificates need to carry
@@ -223,7 +222,7 @@ reject the system genesis block, if the latter includes two MSPs with the same
 identifier, and consequently the bootstrapping of the network would fail.
 
 For application channels, the verification components of only the MSPs that
-govern a channel need to reside in the channel's genesis block. We emphasize
+govern a channel need to reside in the channel's genesis block. We emphasise
 that it is **the responsibility of the application** to ensure that correct
 MSP configuration information is included in the genesis blocks (or the
 most recent configuration block) of a channel prior to instructing one or
@@ -249,7 +248,7 @@ configuration in commonly met scenarios.
 **1) Mapping between organizations/corporations and MSPs**
 
 We recommend that there is a one-to-one mapping between organizations and MSPs.
-If a different type of mapping is chosen, the following needs to be to
+If a different mapping type of mapping is chosen, the following needs to be to
 considered:
 
 - **One organization employing various MSPs.** This corresponds to the
@@ -261,7 +260,7 @@ considered:
   data with a set of peers that are members of the same subdivision, and NOT with
   the full set of providers constituting the actual organization.
 - **Multiple organizations using a single MSP.** This corresponds to a
-  case of a consortium of organizations that are governed by similar
+  case of a consortium of organisations that are governed by similar
   membership architecture. One needs to know here that peers would propagate
   organization-scoped messages to the peers that have an identity under the
   same MSP regardless of whether they belong to the same actual organization.
@@ -282,7 +281,7 @@ Two ways to handle this:
   a chaincode. A limitation of this approach is that gossip peers would
   consider peers with membership identities under their local MSP as
   members of the same organization, and would consequently gossip
-  with them organization-scoped data (e.g. their status).
+  with them organisation-scoped data (e.g. their status).
 - **Defining one MSP to represent each division**.  This would involve specifying for each
   division, a set of certificates for root CAs, intermediate CAs, and admin
   Certs, such that there is no overlapping certification path across MSPs.
@@ -301,7 +300,7 @@ as orderers).
 
 There is limited support for such requirements.
 
-One way to allow for this separation is to create a separate intermediate
+One way to allow for this separation is to to create a separate intermediate
 CA for each node type - one for clients and one for peers/orderers; and
 configure two different MSPs - one for clients and one for peers/orderers.
 Channels this organization should be accessing would need to include
@@ -322,7 +321,7 @@ peer/orderer MSP would be the administrators of that MSP.
 Another point to be considered with this approach is that peers
 authorize event registration requests based on membership of request
 originator within their local MSP. Clearly, since the originator of the
-request is a client, the request originator is always deemed to belong
+request is a client, the request originator is always doomed to belong
 to a different MSP than the requested peer and the peer would reject the
 request.
 

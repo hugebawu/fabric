@@ -16,7 +16,6 @@ import (
 )
 
 func TestEmptyEndpoints(t *testing.T) {
-	t.Parallel()
 	noopFactory := func(endpoint string) (*grpc.ClientConn, error) {
 		return nil, nil
 	}
@@ -24,7 +23,6 @@ func TestEmptyEndpoints(t *testing.T) {
 }
 
 func TestConnFailures(t *testing.T) {
-	t.Parallel()
 	conn2Endpoint := make(map[string]string)
 	shouldConnFail := map[string]bool{
 		"a": true,
@@ -72,7 +70,6 @@ func TestConnFailures(t *testing.T) {
 }
 
 func TestUpdateEndpoints(t *testing.T) {
-	t.Parallel()
 	conn2Endpoint := make(map[string]string)
 	connFactory := func(endpoint string) (*grpc.ClientConn, error) {
 		conn := &grpc.ClientConn{}

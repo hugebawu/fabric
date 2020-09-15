@@ -58,7 +58,7 @@ func (this EvaluableExpression) findNextSQLString(stream *tokenStream, transacti
 		ret = fmt.Sprintf("'%s'", token.Value.(time.Time).Format(this.QueryDateFormat))
 
 	case LOGICALOP:
-		switch logicalSymbols[token.Value.(string)] {
+		switch LOGICAL_SYMBOLS[token.Value.(string)] {
 
 		case AND:
 			ret = "AND"
@@ -80,7 +80,7 @@ func (this EvaluableExpression) findNextSQLString(stream *tokenStream, transacti
 		ret = fmt.Sprintf("%g", token.Value.(float64))
 
 	case COMPARATOR:
-		switch comparatorSymbols[token.Value.(string)] {
+		switch COMPARATOR_SYMBOLS[token.Value.(string)] {
 
 		case EQ:
 			ret = "="
@@ -96,7 +96,7 @@ func (this EvaluableExpression) findNextSQLString(stream *tokenStream, transacti
 
 	case TERNARY:
 
-		switch ternarySymbols[token.Value.(string)] {
+		switch TERNARY_SYMBOLS[token.Value.(string)] {
 
 		case COALESCE:
 
@@ -113,7 +113,7 @@ func (this EvaluableExpression) findNextSQLString(stream *tokenStream, transacti
 			return "", errors.New("Ternary operators are unsupported in SQL output")
 		}
 	case PREFIX:
-		switch prefixSymbols[token.Value.(string)] {
+		switch PREFIX_SYMBOLS[token.Value.(string)] {
 
 		case INVERT:
 			ret = fmt.Sprintf("NOT")
@@ -128,7 +128,7 @@ func (this EvaluableExpression) findNextSQLString(stream *tokenStream, transacti
 		}
 	case MODIFIER:
 
-		switch modifierSymbols[token.Value.(string)] {
+		switch MODIFIER_SYMBOLS[token.Value.(string)] {
 
 		case EXPONENT:
 

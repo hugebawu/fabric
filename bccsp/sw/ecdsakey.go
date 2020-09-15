@@ -17,11 +17,14 @@ package sw
 
 import (
 	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/sha256"
 	"crypto/x509"
-	"errors"
 	"fmt"
+
+	"crypto/sha256"
+
+	"errors"
+
+	"crypto/elliptic"
 
 	"github.com/hyperledger/fabric/bccsp"
 )
@@ -32,12 +35,12 @@ type ecdsaPrivateKey struct {
 
 // Bytes converts this key to its byte representation,
 // if this operation is allowed.
-func (k *ecdsaPrivateKey) Bytes() ([]byte, error) {
+func (k *ecdsaPrivateKey) Bytes() (raw []byte, err error) {
 	return nil, errors.New("Not supported.")
 }
 
 // SKI returns the subject key identifier of this key.
-func (k *ecdsaPrivateKey) SKI() []byte {
+func (k *ecdsaPrivateKey) SKI() (ski []byte) {
 	if k.privKey == nil {
 		return nil
 	}
@@ -84,7 +87,7 @@ func (k *ecdsaPublicKey) Bytes() (raw []byte, err error) {
 }
 
 // SKI returns the subject key identifier of this key.
-func (k *ecdsaPublicKey) SKI() []byte {
+func (k *ecdsaPublicKey) SKI() (ski []byte) {
 	if k.pubKey == nil {
 		return nil
 	}

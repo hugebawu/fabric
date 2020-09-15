@@ -16,11 +16,11 @@ import (
 )
 
 func TestGetVersionInfo(t *testing.T) {
-	testSHA := "abcdefg"
-	metadata.CommitSHA = testSHA
+	testVersion := "TestVersion"
+	metadata.Version = testVersion
 
-	expected := fmt.Sprintf("%s:\n Version: %s\n Commit SHA: %s\n Go version: %s\n OS/Arch: %s",
-		metadata.ProgramName, metadata.Version, testSHA, runtime.Version(),
+	expected := fmt.Sprintf("%s:\n Version: %s\n Go version: %s\n OS/Arch: %s",
+		metadata.ProgramName, testVersion, runtime.Version(),
 		fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH))
 	assert.Equal(t, expected, metadata.GetVersionInfo())
 }

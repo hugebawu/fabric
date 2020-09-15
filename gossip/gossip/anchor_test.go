@@ -7,7 +7,6 @@ SPDX-License-Identifier: Apache-2.0
 package gossip
 
 import (
-	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -23,6 +22,7 @@ import (
 	"github.com/hyperledger/fabric/gossip/common"
 	proto "github.com/hyperledger/fabric/protos/gossip"
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -263,7 +263,7 @@ func TestAnchorPeer(t *testing.T) {
 	p := newGossipInstanceWithExternalEndpoint(portPrefix, 0, cs, endpoint)
 	defer p.Stop()
 	p.JoinChan(jcm, channel)
-	p.UpdateLedgerHeight(1, channel)
+	p.UpdateChannelMetadata(createMetadata(1), channel)
 
 	time.Sleep(time.Second * 5)
 

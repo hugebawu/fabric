@@ -1,13 +1,24 @@
 /*
-Copyright IBM Corp. All Rights Reserved.
+Copyright IBM Corp. 2016 All Rights Reserved.
 
-SPDX-License-Identifier: Apache-2.0
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+		 http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
 
 package fsblkstorage
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 
 	"github.com/golang/protobuf/proto"
@@ -17,7 +28,6 @@ import (
 	ledgerUtil "github.com/hyperledger/fabric/core/ledger/util"
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/peer"
-	"github.com/pkg/errors"
 )
 
 const (
@@ -57,22 +67,14 @@ type blockIndex struct {
 	db            *leveldbhelper.DBHandle
 }
 
-func newBlockIndex(indexConfig *blkstorage.IndexConfig, db *leveldbhelper.DBHandle) (*blockIndex, error) {
+func newBlockIndex(indexConfig *blkstorage.IndexConfig, db *leveldbhelper.DBHandle) *blockIndex {
 	indexItems := indexConfig.AttrsToIndex
 	logger.Debugf("newBlockIndex() - indexItems:[%s]", indexItems)
 	indexItemsMap := make(map[blkstorage.IndexableAttr]bool)
 	for _, indexItem := range indexItems {
 		indexItemsMap[indexItem] = true
 	}
-	// This dependency is needed because the index 'IndexableAttrTxID' is used for detecting the duplicate txid
-	// and the results are reused in the other two indexes. Ideally, all three index should be merged into one
-	// for efficiency purpose - [FAB-10587]
-	if (indexItemsMap[blkstorage.IndexableAttrTxValidationCode] || indexItemsMap[blkstorage.IndexableAttrBlockTxID]) &&
-		!indexItemsMap[blkstorage.IndexableAttrTxID] {
-		return nil, errors.Errorf("dependent index [%s] is not enabled for [%s] or [%s]",
-			blkstorage.IndexableAttrTxID, blkstorage.IndexableAttrTxValidationCode, blkstorage.IndexableAttrBlockTxID)
-	}
-	return &blockIndex{indexItemsMap, db}, nil
+	return &blockIndex{indexItemsMap, db}
 }
 
 func (index *blockIndex) getLastBlockIndexed() (uint64, error) {
@@ -115,17 +117,9 @@ func (index *blockIndex) indexBlock(blockIdxInfo *blockIdxInfo) error {
 
 	//Index3 Used to find a transaction by it's transaction id
 	if _, ok := index.indexItemsMap[blkstorage.IndexableAttrTxID]; ok {
-		if err = index.markDuplicateTxids(blockIdxInfo); err != nil {
-			logger.Errorf("error detecting duplicate txids: %s", err)
-			return errors.WithMessage(err, "error detecting duplicate txids")
-		}
 		for _, txoffset := range txOffsets {
-			if txoffset.isDuplicate { // do not overwrite txid entry in the index - FAB-8557
-				logger.Debugf("txid [%s] is a duplicate of a previous tx. Not indexing in txid-index", txoffset.txID)
-				continue
-			}
 			txFlp := newFileLocationPointer(flp.fileSuffixNum, flp.offset, txoffset.loc)
-			logger.Debugf("Adding txLoc [%s] for tx ID: [%s] to txid-index", txFlp, txoffset.txID)
+			logger.Debugf("Adding txLoc [%s] for tx ID: [%s] to index", txFlp, txoffset.txID)
 			txFlpBytes, marshalErr := txFlp.marshal()
 			if marshalErr != nil {
 				return marshalErr
@@ -150,9 +144,6 @@ func (index *blockIndex) indexBlock(blockIdxInfo *blockIdxInfo) error {
 	// Index5 - Store BlockNumber will be used to find block by transaction id
 	if _, ok := index.indexItemsMap[blkstorage.IndexableAttrBlockTxID]; ok {
 		for _, txoffset := range txOffsets {
-			if txoffset.isDuplicate { // do not overwrite txid entry in the index - FAB-8557
-				continue
-			}
 			batch.Put(constructBlockTxIDKey(txoffset.txID), flpBytes)
 		}
 	}
@@ -160,9 +151,6 @@ func (index *blockIndex) indexBlock(blockIdxInfo *blockIdxInfo) error {
 	// Index6 - Store transaction validation result by transaction id
 	if _, ok := index.indexItemsMap[blkstorage.IndexableAttrTxValidationCode]; ok {
 		for idx, txoffset := range txOffsets {
-			if txoffset.isDuplicate { // do not overwrite txid entry in the index - FAB-8557
-				continue
-			}
 			batch.Put(constructTxValidationCodeIDKey(txoffset.txID), []byte{byte(txsfltr.Flag(idx))})
 		}
 	}
@@ -171,28 +159,6 @@ func (index *blockIndex) indexBlock(blockIdxInfo *blockIdxInfo) error {
 	// Setting snyc to true as a precaution, false may be an ok optimization after further testing.
 	if err := index.db.WriteBatch(batch, true); err != nil {
 		return err
-	}
-	return nil
-}
-
-func (index *blockIndex) markDuplicateTxids(blockIdxInfo *blockIdxInfo) error {
-	uniqueTxids := make(map[string]bool)
-	for _, txIdxInfo := range blockIdxInfo.txOffsets {
-		txid := txIdxInfo.txID
-		if uniqueTxids[txid] { // txid is duplicate of a previous tx in the block
-			txIdxInfo.isDuplicate = true
-			continue
-		}
-
-		loc, err := index.getTxLoc(txid)
-		if loc != nil { // txid is duplicate of a previous tx in the index
-			txIdxInfo.isDuplicate = true
-			continue
-		}
-		if err != blkstorage.ErrNotFoundInIndex {
-			return err
-		}
-		uniqueTxids[txid] = true
 	}
 	return nil
 }
@@ -289,7 +255,7 @@ func (index *blockIndex) getTxValidationCodeByTxID(txID string) (peer.TxValidati
 	} else if raw == nil {
 		return peer.TxValidationCode(-1), blkstorage.ErrNotFoundInIndex
 	} else if len(raw) != 1 {
-		return peer.TxValidationCode(-1), errors.New("invalid value in indexItems")
+		return peer.TxValidationCode(-1), errors.New("Invalid value in indexItems")
 	}
 
 	result := peer.TxValidationCode(int32(raw[0]))

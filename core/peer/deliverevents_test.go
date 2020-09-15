@@ -7,7 +7,6 @@ SPDX-License-Identifier: Apache-2.0
 package peer
 
 import (
-	"context"
 	"io"
 	"sync"
 	"testing"
@@ -15,7 +14,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/deliver"
 	"github.com/hyperledger/fabric/common/ledger/blockledger"
-	"github.com/hyperledger/fabric/common/metrics/disabled"
 	"github.com/hyperledger/fabric/common/policies"
 	"github.com/hyperledger/fabric/common/util"
 	"github.com/hyperledger/fabric/protos/common"
@@ -25,6 +23,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"golang.org/x/net/context"
 	"google.golang.org/grpc/metadata"
 	peer2 "google.golang.org/grpc/peer"
 )
@@ -32,7 +31,7 @@ import (
 // defaultPolicyCheckerProvider policy checker provider used by default,
 // generates policy checker which always accepts regardless of arguments
 // passed in
-var defaultPolicyCheckerProvider = func(_ string) deliver.PolicyCheckerFunc {
+var defaultPolicyCheckerProvider = func(_ string) deliver.PolicyChecker {
 	return func(_ *common.Envelope, _ string) error {
 		return nil
 	}
@@ -94,14 +93,14 @@ func (*mockChainSupport) Errored() <-chan struct{} {
 	return make(chan struct{})
 }
 
-// mockChainManager mock implementation of the ChainManager interface
-type mockChainManager struct {
+// mockSupportManager mock implementation of the SupportManager interface
+type mockSupportManager struct {
 	mock.Mock
 }
 
-func (m *mockChainManager) GetChain(chainID string) deliver.Chain {
+func (m *mockSupportManager) GetChain(chainID string) (deliver.Support, bool) {
 	args := m.Called(chainID)
-	return args.Get(0).(deliver.Chain)
+	return args.Get(0).(deliver.Support), args.Get(1).(bool)
 }
 
 // mockDeliverServer mock implementation of the Deliver_DeliverServer
@@ -157,14 +156,7 @@ type testConfig struct {
 
 type testCase struct {
 	name    string
-	prepare func(wg *sync.WaitGroup) (deliver.ChainManager, peer.Deliver_DeliverServer)
-}
-
-func TestFilteredBlockResponseSenderIsFiltered(t *testing.T) {
-	var fbrs interface{} = &filteredBlockResponseSender{}
-	filtered, ok := fbrs.(deliver.Filtered)
-	assert.True(t, ok, "should be filtered")
-	assert.True(t, filtered.IsFiltered(), "should return true from IsFiltered")
+	prepare func(wg *sync.WaitGroup) (deliver.SupportManager, peer.Deliver_DeliverServer)
 }
 
 func TestEventsServer_DeliverFiltered(t *testing.T) {
@@ -172,14 +164,14 @@ func TestEventsServer_DeliverFiltered(t *testing.T) {
 	tests := []testCase{
 		{
 			name: "Testing deliver of the filtered block events",
-			prepare: func(config testConfig) func(wg *sync.WaitGroup) (deliver.ChainManager, peer.Deliver_DeliverServer) {
-				return func(wg *sync.WaitGroup) (deliver.ChainManager, peer.Deliver_DeliverServer) {
+			prepare: func(config testConfig) func(wg *sync.WaitGroup) (deliver.SupportManager, peer.Deliver_DeliverServer) {
+				return func(wg *sync.WaitGroup) (deliver.SupportManager, peer.Deliver_DeliverServer) {
 					wg.Add(2)
 					p := &peer2.Peer{}
 					chaincodeActionPayload, err := createChaincodeAction(config.chaincodeName, config.eventName, config.txID)
 					config.NoError(err)
 
-					chainManager := createDefaultSupportMamangerMock(config, chaincodeActionPayload)
+					supportManager := createDefaultSupportMamangerMock(config, chaincodeActionPayload)
 					// setup mock deliver server
 					deliverServer := &mockDeliverServer{}
 					deliverServer.On("Context").Return(peer2.NewContext(context.TODO(), p))
@@ -222,7 +214,7 @@ func TestEventsServer_DeliverFiltered(t *testing.T) {
 						}).Return(nil)
 					})
 
-					return chainManager, deliverServer
+					return supportManager, deliverServer
 				}
 			}(testConfig{
 				channelID:     "testChainID",
@@ -248,11 +240,11 @@ func TestEventsServer_DeliverFiltered(t *testing.T) {
 		},
 		{
 			name: "Testing deliver of the filtered block events with nil chaincode action payload",
-			prepare: func(config testConfig) func(wg *sync.WaitGroup) (deliver.ChainManager, peer.Deliver_DeliverServer) {
-				return func(wg *sync.WaitGroup) (deliver.ChainManager, peer.Deliver_DeliverServer) {
+			prepare: func(config testConfig) func(wg *sync.WaitGroup) (deliver.SupportManager, peer.Deliver_DeliverServer) {
+				return func(wg *sync.WaitGroup) (deliver.SupportManager, peer.Deliver_DeliverServer) {
 					wg.Add(2)
 					p := &peer2.Peer{}
-					chainManager := createDefaultSupportMamangerMock(config, nil)
+					supportManager := createDefaultSupportMamangerMock(config, nil)
 
 					// setup mock deliver server
 					deliverServer := &mockDeliverServer{}
@@ -295,7 +287,7 @@ func TestEventsServer_DeliverFiltered(t *testing.T) {
 						}).Return(nil)
 					})
 
-					return chainManager, deliverServer
+					return supportManager, deliverServer
 				}
 			}(testConfig{
 				channelID:     "testChainID",
@@ -321,11 +313,11 @@ func TestEventsServer_DeliverFiltered(t *testing.T) {
 		},
 		{
 			name: "Testing deliver of the filtered block events with nil payload header",
-			prepare: func(config testConfig) func(wg *sync.WaitGroup) (deliver.ChainManager, peer.Deliver_DeliverServer) {
-				return func(wg *sync.WaitGroup) (deliver.ChainManager, peer.Deliver_DeliverServer) {
+			prepare: func(config testConfig) func(wg *sync.WaitGroup) (deliver.SupportManager, peer.Deliver_DeliverServer) {
+				return func(wg *sync.WaitGroup) (deliver.SupportManager, peer.Deliver_DeliverServer) {
 					wg.Add(1)
 					p := &peer2.Peer{}
-					chainManager := createDefaultSupportMamangerMock(config, nil)
+					supportManager := createDefaultSupportMamangerMock(config, nil)
 
 					// setup mock deliver server
 					deliverServer := &mockDeliverServer{}
@@ -355,7 +347,7 @@ func TestEventsServer_DeliverFiltered(t *testing.T) {
 						}).Return(nil)
 					})
 
-					return chainManager, deliverServer
+					return supportManager, deliverServer
 				}
 			}(testConfig{
 				channelID:     "testChainID",
@@ -377,14 +369,9 @@ func TestEventsServer_DeliverFiltered(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			wg := &sync.WaitGroup{}
-			chainManager, deliverServer := test.prepare(wg)
+			supportManager, deliverServer := test.prepare(wg)
 
-			server := NewDeliverEventsServer(
-				false,
-				defaultPolicyCheckerProvider,
-				chainManager,
-				&disabled.Provider{},
-			)
+			server := NewDeliverEventsServer(false, defaultPolicyCheckerProvider, supportManager)
 			err := server.DeliverFiltered(deliverServer)
 			wg.Wait()
 			// no error expected
@@ -392,8 +379,8 @@ func TestEventsServer_DeliverFiltered(t *testing.T) {
 		})
 	}
 }
-func createDefaultSupportMamangerMock(config testConfig, chaincodeActionPayload *peer.ChaincodeActionPayload) *mockChainManager {
-	chainManager := &mockChainManager{}
+func createDefaultSupportMamangerMock(config testConfig, chaincodeActionPayload *peer.ChaincodeActionPayload) *mockSupportManager {
+	supportManager := &mockSupportManager{}
 	iter := &mockIterator{}
 	reader := &mockReader{}
 	chain := &mockChainSupport{}
@@ -414,9 +401,9 @@ func createDefaultSupportMamangerMock(config testConfig, chaincodeActionPayload 
 	reader.On("Height").Return(uint64(1))
 	chain.On("Sequence").Return(uint64(0))
 	chain.On("Reader").Return(reader)
-	chainManager.On("GetChain", config.channelID).Return(chain, true)
+	supportManager.On("GetChain", config.channelID).Return(chain, true)
 
-	return chainManager
+	return supportManager
 }
 
 func createEndorsement(channelID string, txID string, chaincodeActionPayload *peer.ChaincodeActionPayload) (*common.Payload, error) {

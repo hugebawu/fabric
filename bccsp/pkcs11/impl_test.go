@@ -1,15 +1,24 @@
-// +build pkcs11
-
 /*
-Copyright IBM Corp. All Rights Reserved.
+Copyright IBM Corp. 2016 All Rights Reserved.
 
-SPDX-License-Identifier: Apache-2.0
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+		 http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
 package pkcs11
 
 import (
 	"bytes"
 	"crypto"
+	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
@@ -31,6 +40,7 @@ import (
 	"github.com/hyperledger/fabric/bccsp/signer"
 	"github.com/hyperledger/fabric/bccsp/sw"
 	"github.com/hyperledger/fabric/bccsp/utils"
+	"github.com/op/go-logging"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/crypto/sha3"
 )
@@ -45,10 +55,13 @@ type testConfig struct {
 	securityLevel int
 	hashFamily    string
 	softVerify    bool
-	immutable     bool
+	noKeyImport   bool
 }
 
 func TestMain(m *testing.M) {
+	// Activate DEBUG level to cover listAttrs function
+	logging.SetLevel(logging.DEBUG, "bccsp_p11")
+
 	ks, err := sw.NewFileBasedKeyStore(nil, os.TempDir(), false)
 	if err != nil {
 		fmt.Printf("Failed initiliazing KeyStore [%s]", err)
@@ -58,17 +71,16 @@ func TestMain(m *testing.M) {
 
 	lib, pin, label := FindPKCS11Lib()
 	tests := []testConfig{
-		{256, "SHA2", true, false},
-		{256, "SHA3", false, false},
-		{384, "SHA2", false, false},
-		{384, "SHA3", false, false},
-		{384, "SHA3", true, false},
+		{256, "SHA2", true, true},
+		{256, "SHA3", false, true},
+		{384, "SHA2", false, true},
+		{384, "SHA3", false, true},
+		{384, "SHA3", true, true},
 	}
 
 	if strings.Contains(lib, "softhsm") {
 		tests = append(tests, []testConfig{
 			{256, "SHA2", true, false},
-			{256, "SHA2", true, true},
 		}...)
 	}
 
@@ -84,8 +96,7 @@ func TestMain(m *testing.M) {
 		opts.HashFamily = config.hashFamily
 		opts.SecLevel = config.securityLevel
 		opts.SoftVerify = config.softVerify
-		opts.Immutable = config.immutable
-		fmt.Printf("Immutable = [%v]", opts.Immutable)
+		opts.Sensitive = config.noKeyImport
 		currentBCCSP, err = New(opts, currentKS)
 		if err != nil {
 			fmt.Printf("Failed initiliazing BCCSP at [%+v]: [%s]", opts, err)
@@ -106,6 +117,7 @@ func TestNew(t *testing.T) {
 		HashFamily: "SHA2",
 		SecLevel:   256,
 		SoftVerify: false,
+		Sensitive:  true,
 		Library:    "lib",
 		Label:      "ForFabric",
 		Pin:        "98765432",
@@ -162,6 +174,7 @@ func TestInvalidNewParameter(t *testing.T) {
 		Label:      label,
 		Pin:        pin,
 		SoftVerify: true,
+		Sensitive:  true,
 	}
 
 	opts.HashFamily = "SHA2"
@@ -580,6 +593,58 @@ func TestECDSAPublicKeySKI(t *testing.T) {
 	}
 }
 
+func TestECDSAKeyReRand(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping TestECDSAKeyReRand")
+	}
+	if currentBCCSP.(*impl).noPrivImport {
+		t.Skip("Key import turned off. Skipping Derivation tests as they currently require Key Import.")
+	}
+
+	k, err := currentBCCSP.KeyGen(&bccsp.ECDSAKeyGenOpts{Temporary: false})
+	if err != nil {
+		t.Fatalf("Failed generating ECDSA key [%s]", err)
+	}
+	if k == nil {
+		t.Fatal("Failed re-randomizing ECDSA key. Re-randomized Key must be different from nil")
+	}
+
+	reRandomizedKey, err := currentBCCSP.KeyDeriv(k, &bccsp.ECDSAReRandKeyOpts{Temporary: false, Expansion: []byte{1}})
+	if err != nil {
+		t.Fatalf("Failed re-randomizing ECDSA key [%s]", err)
+	}
+	if !reRandomizedKey.Private() {
+		t.Fatal("Failed re-randomizing ECDSA key. Re-randomized Key should be private")
+	}
+	if reRandomizedKey.Symmetric() {
+		t.Fatal("Failed re-randomizing ECDSA key. Re-randomized Key should be asymmetric")
+	}
+
+	k2, err := k.PublicKey()
+	if err != nil {
+		t.Fatalf("Failed getting public ECDSA key from private [%s]", err)
+	}
+	if k2 == nil {
+		t.Fatal("Failed re-randomizing ECDSA key. Re-randomized Key must be different from nil")
+	}
+
+	reRandomizedKey2, err := currentBCCSP.KeyDeriv(k2, &bccsp.ECDSAReRandKeyOpts{Temporary: false, Expansion: []byte{1}})
+	if err != nil {
+		t.Fatalf("Failed re-randomizing ECDSA key [%s]", err)
+	}
+
+	if reRandomizedKey2.Private() {
+		t.Fatal("Re-randomized public Key must remain public")
+	}
+	if reRandomizedKey2.Symmetric() {
+		t.Fatal("Re-randomized ECDSA asymmetric key must remain asymmetric")
+	}
+
+	if false == bytes.Equal(reRandomizedKey.SKI(), reRandomizedKey2.SKI()) {
+		t.Fatal("Re-randomized ECDSA Private- or Public-Keys must end up having the same SKI")
+	}
+}
+
 func TestECDSASign(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping TestECDSASign")
@@ -606,11 +671,11 @@ func TestECDSASign(t *testing.T) {
 
 	_, err = currentBCCSP.Sign(nil, digest, nil)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "Invalid Key. It must not be nil")
+	assert.Contains(t, err.Error(), "Invalid Key. It must not be nil.")
 
 	_, err = currentBCCSP.Sign(k, nil, nil)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "Invalid digest. Cannot be empty")
+	assert.Contains(t, err.Error(), "Invalid digest. Cannot be empty.")
 }
 
 func TestECDSAVerify(t *testing.T) {
@@ -657,15 +722,15 @@ func TestECDSAVerify(t *testing.T) {
 
 	_, err = currentBCCSP.Verify(nil, signature, digest, nil)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "Invalid Key. It must not be nil")
+	assert.Contains(t, err.Error(), "Invalid Key. It must not be nil.")
 
 	_, err = currentBCCSP.Verify(pk, nil, digest, nil)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "Invalid signature. Cannot be empty")
+	assert.Contains(t, err.Error(), "Invalid signature. Cannot be empty.")
 
 	_, err = currentBCCSP.Verify(pk, signature, nil, nil)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "Invalid digest. Cannot be empty")
+	assert.Contains(t, err.Error(), "Invalid digest. Cannot be empty.")
 
 	// Import the exported public key
 	pkRaw, err := pk.Bytes()
@@ -685,6 +750,53 @@ func TestECDSAVerify(t *testing.T) {
 	}
 
 	valid, err = currentBCCSP.Verify(pk2, signature, digest, nil)
+	if err != nil {
+		t.Fatalf("Failed verifying ECDSA signature [%s]", err)
+	}
+	if !valid {
+		t.Fatal("Failed verifying ECDSA signature. Signature not valid.")
+	}
+}
+
+func TestECDSAKeyDeriv(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping TestECDSAKeyDeriv")
+	}
+	if currentBCCSP.(*impl).noPrivImport {
+		t.Skip("Key import turned off. Skipping Derivation tests as they currently require Key Import.")
+	}
+
+	k, err := currentBCCSP.KeyGen(&bccsp.ECDSAKeyGenOpts{Temporary: false})
+	if err != nil {
+		t.Fatalf("Failed generating ECDSA key [%s]", err)
+	}
+
+	reRandomizedKey, err := currentBCCSP.KeyDeriv(k, &bccsp.ECDSAReRandKeyOpts{Temporary: false, Expansion: []byte{1}})
+	if err != nil {
+		t.Fatalf("Failed re-randomizing ECDSA key [%s]", err)
+	}
+
+	_, err = currentBCCSP.KeyDeriv(nil, &bccsp.ECDSAReRandKeyOpts{Temporary: false, Expansion: []byte{1}})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "Invalid Key. It must not be nil.")
+
+	_, err = currentBCCSP.KeyDeriv(k, nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "Invalid Opts parameter. It must not be nil.")
+
+	msg := []byte("Hello World")
+
+	digest, err := currentBCCSP.Hash(msg, &bccsp.SHAOpts{})
+	if err != nil {
+		t.Fatalf("Failed computing HASH [%s]", err)
+	}
+
+	signature, err := currentBCCSP.Sign(reRandomizedKey, digest, nil)
+	if err != nil {
+		t.Fatalf("Failed generating ECDSA signature [%s]", err)
+	}
+
+	valid, err := currentBCCSP.Verify(reRandomizedKey, signature, digest, nil)
 	if err != nil {
 		t.Fatalf("Failed verifying ECDSA signature [%s]", err)
 	}
@@ -802,6 +914,71 @@ func TestECDSAKeyImportFromECDSAPublicKey(t *testing.T) {
 	}
 }
 
+func TestECDSAKeyImportFromECDSAPrivateKey(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping TestECDSAKeyImportFromECDSAPrivateKey")
+	}
+	if currentBCCSP.(*impl).noPrivImport {
+		t.Skip("Key import turned off. Skipping Derivation tests as they currently require Key Import.")
+	}
+
+	// Generate an ECDSA key, default is P256
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed generating ECDSA key [%s]", err)
+	}
+
+	// Import the ecdsa.PrivateKey
+	priv, err := utils.PrivateKeyToDER(key)
+	if err != nil {
+		t.Fatalf("Failed converting raw to ecdsa.PrivateKey [%s]", err)
+	}
+
+	sk, err := currentBCCSP.KeyImport(priv, &bccsp.ECDSAPrivateKeyImportOpts{Temporary: false})
+	if err != nil {
+		t.Fatalf("Failed importing ECDSA private key [%s]", err)
+	}
+	if sk == nil {
+		t.Fatal("Failed importing ECDSA private key. Return BCCSP key cannot be nil.")
+	}
+
+	// Import the ecdsa.PublicKey
+	pub, err := utils.PublicKeyToDER(&key.PublicKey)
+	if err != nil {
+		t.Fatalf("Failed converting raw to ecdsa.PublicKey [%s]", err)
+	}
+
+	pk, err := currentBCCSP.KeyImport(pub, &bccsp.ECDSAPKIXPublicKeyImportOpts{Temporary: false})
+
+	if err != nil {
+		t.Fatalf("Failed importing ECDSA public key [%s]", err)
+	}
+	if pk == nil {
+		t.Fatal("Failed importing ECDSA public key. Return BCCSP key cannot be nil.")
+	}
+
+	// Sign and verify with the imported public key
+	msg := []byte("Hello World")
+
+	digest, err := currentBCCSP.Hash(msg, &bccsp.SHAOpts{})
+	if err != nil {
+		t.Fatalf("Failed computing HASH [%s]", err)
+	}
+
+	signature, err := currentBCCSP.Sign(sk, digest, nil)
+	if err != nil {
+		t.Fatalf("Failed generating ECDSA signature [%s]", err)
+	}
+
+	valid, err := currentBCCSP.Verify(pk, signature, digest, nil)
+	if err != nil {
+		t.Fatalf("Failed verifying ECDSA signature [%s]", err)
+	}
+	if !valid {
+		t.Fatal("Failed verifying ECDSA signature. Signature not valid.")
+	}
+}
+
 func TestKeyImportFromX509ECDSAPublicKey(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping TestKeyImportFromX509ECDSAPublicKey")
@@ -847,7 +1024,7 @@ func TestKeyImportFromX509ECDSAPublicKey(t *testing.T) {
 		UnknownExtKeyUsage: testUnknownExtKeyUsage,
 
 		BasicConstraintsValid: true,
-		IsCA:                  true,
+		IsCA: true,
 
 		OCSPServer:            []string{"http://ocurrentBCCSP.example.com"},
 		IssuingCertificateURL: []string{"http://crt.example.com/ca1.crt"},
@@ -1693,7 +1870,7 @@ func TestKeyImportFromX509RSAPublicKey(t *testing.T) {
 		UnknownExtKeyUsage: testUnknownExtKeyUsage,
 
 		BasicConstraintsValid: true,
-		IsCA:                  true,
+		IsCA: true,
 
 		OCSPServer:            []string{"http://ocurrentBCCSP.example.com"},
 		IssuingCertificateURL: []string{"http://crt.example.com/ca1.crt"},

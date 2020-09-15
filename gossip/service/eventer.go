@@ -10,6 +10,7 @@ import (
 	"reflect"
 
 	"github.com/hyperledger/fabric/common/channelconfig"
+
 	"github.com/hyperledger/fabric/protos/peer"
 )
 

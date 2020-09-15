@@ -24,6 +24,7 @@ import (
 
 	"github.com/hyperledger/fabric/peer/common"
 	cb "github.com/hyperledger/fabric/protos/common"
+
 	"github.com/stretchr/testify/assert"
 )
 

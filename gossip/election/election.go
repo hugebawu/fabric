@@ -8,12 +8,12 @@ package election
 
 import (
 	"bytes"
-	"encoding/hex"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/hyperledger/fabric/gossip/util"
+	"github.com/op/go-logging"
 	"github.com/spf13/viper"
 )
 
@@ -101,13 +101,6 @@ type LeaderElectionService interface {
 
 type peerID []byte
 
-func (p peerID) String() string {
-	if p == nil {
-		return "<nil>"
-	}
-	return hex.EncodeToString(p)
-}
-
 // Peer describes a remote peer
 type Peer interface {
 	// ID returns the ID of the peer
@@ -138,7 +131,7 @@ func NewLeaderElectionService(adapter LeaderElectionAdapter, id string, callback
 		adapter:       adapter,
 		stopChan:      make(chan struct{}, 1),
 		interruptChan: make(chan struct{}, 1),
-		logger:        util.GetLogger(util.ElectionLogger, ""),
+		logger:        util.GetLogger(util.LoggingElectionModule, ""),
 		callback:      noopCallback,
 	}
 
@@ -164,7 +157,7 @@ type leaderElectionSvcImpl struct {
 	yield         int32
 	sleeping      bool
 	adapter       LeaderElectionAdapter
-	logger        util.Logger
+	logger        *logging.Logger
 	callback      leadershipCallback
 	yieldTimer    *time.Timer
 }

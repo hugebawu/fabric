@@ -40,14 +40,6 @@ type gossipMock struct {
 	mock.Mock
 }
 
-func (g *gossipMock) SelfChannelInfo(common.ChainID) *proto.SignedGossipMessage {
-	panic("implement me")
-}
-
-func (g *gossipMock) SelfMembershipInfo() discovery.NetworkMember {
-	panic("implement me")
-}
-
 func (*gossipMock) PeerFilter(channel common.ChainID, messagePredicate api.SubChannelSelectionCriteria) (filter.RoutingFilter, error) {
 	panic("implement me")
 }
@@ -72,15 +64,7 @@ func (*gossipMock) UpdateMetadata(metadata []byte) {
 	panic("implement me")
 }
 
-// UpdateLedgerHeight updates the ledger height the peer
-// publishes to other peers in the channel
-func (*gossipMock) UpdateLedgerHeight(height uint64, chainID common.ChainID) {
-	panic("implement me")
-}
-
-// UpdateChaincodes updates the chaincodes the peer publishes
-// to other peers in the channel
-func (*gossipMock) UpdateChaincodes(chaincode []*proto.Chaincode, chainID common.ChainID) {
+func (*gossipMock) UpdateChannelMetadata(metadata []byte, chainID common.ChainID) {
 	panic("implement me")
 }
 
@@ -100,19 +84,11 @@ func (g *gossipMock) LeaveChan(chainID common.ChainID) {
 	panic("implement me")
 }
 
-func (g *gossipMock) IdentityInfo() api.PeerIdentitySet {
-	panic("implement me")
-}
-
-func (*gossipMock) IsInMyOrg(member discovery.NetworkMember) bool {
-	panic("implement me")
-}
-
 func (*gossipMock) Stop() {
 	panic("implement me")
 }
 
-func (*gossipMock) SendByCriteria(*proto.SignedGossipMessage, gossip.SendCriteria) error {
+func (gossipMock) SendByCriteria(*proto.SignedGossipMessage, gossip.SendCriteria) error {
 	panic("implement me")
 }
 

@@ -7,24 +7,27 @@ SPDX-License-Identifier: Apache-2.0
 package blockcutter
 
 import (
-	"time"
-
 	"github.com/hyperledger/fabric/common/channelconfig"
-	"github.com/hyperledger/fabric/common/flogging"
 	cb "github.com/hyperledger/fabric/protos/common"
+
+	"github.com/hyperledger/fabric/common/flogging"
+	"github.com/op/go-logging"
 )
 
-var logger = flogging.MustGetLogger("orderer.common.blockcutter")
+const pkgLogID = "orderer/common/blockcutter"
 
-type OrdererConfigFetcher interface {
-	OrdererConfig() (channelconfig.Orderer, bool)
+var logger *logging.Logger
+
+func init() {
+	logger = flogging.MustGetLogger(pkgLogID)
 }
 
 // Receiver defines a sink for the ordered broadcast messages
 type Receiver interface {
 	// Ordered should be invoked sequentially as messages are ordered
 	// Each batch in `messageBatches` will be wrapped into a block.
-	// `pending` indicates if there are still messages pending in the receiver.
+	// `pending` indicates if there are still messages pending in the receiver. It
+	// is useful for Kafka orderer to determine the `LastOffsetPersisted` of block.
 	Ordered(msg *cb.Envelope) (messageBatches [][]*cb.Envelope, pending bool)
 
 	// Cut returns the current batch and starts a new one
@@ -32,21 +35,15 @@ type Receiver interface {
 }
 
 type receiver struct {
-	sharedConfigFetcher   OrdererConfigFetcher
+	sharedConfigManager   channelconfig.Orderer
 	pendingBatch          []*cb.Envelope
 	pendingBatchSizeBytes uint32
-
-	PendingBatchStartTime time.Time
-	ChannelID             string
-	Metrics               *Metrics
 }
 
 // NewReceiverImpl creates a Receiver implementation based on the given configtxorderer manager
-func NewReceiverImpl(channelID string, sharedConfigFetcher OrdererConfigFetcher, metrics *Metrics) Receiver {
+func NewReceiverImpl(sharedConfigManager channelconfig.Orderer) Receiver {
 	return &receiver{
-		sharedConfigFetcher: sharedConfigFetcher,
-		Metrics:             metrics,
-		ChannelID:           channelID,
+		sharedConfigManager: sharedConfigManager,
 	}
 }
 
@@ -67,21 +64,9 @@ func NewReceiverImpl(channelID string, sharedConfigFetcher OrdererConfigFetcher,
 //
 // Note that messageBatches can not be greater than 2.
 func (r *receiver) Ordered(msg *cb.Envelope) (messageBatches [][]*cb.Envelope, pending bool) {
-	if len(r.pendingBatch) == 0 {
-		// We are beginning a new batch, mark the time
-		r.PendingBatchStartTime = time.Now()
-	}
-
-	ordererConfig, ok := r.sharedConfigFetcher.OrdererConfig()
-	if !ok {
-		logger.Panicf("Could not retrieve orderer config to query batch parameters, block cutting is not possible")
-	}
-
-	batchSize := ordererConfig.BatchSize()
-
 	messageSizeBytes := messageSizeBytes(msg)
-	if messageSizeBytes > batchSize.PreferredMaxBytes {
-		logger.Debugf("The current message, with %v bytes, is larger than the preferred batch size of %v bytes and will be isolated.", messageSizeBytes, batchSize.PreferredMaxBytes)
+	if messageSizeBytes > r.sharedConfigManager.BatchSize().PreferredMaxBytes {
+		logger.Debugf("The current message, with %v bytes, is larger than the preferred batch size of %v bytes and will be isolated.", messageSizeBytes, r.sharedConfigManager.BatchSize().PreferredMaxBytes)
 
 		// cut pending batch, if it has any messages
 		if len(r.pendingBatch) > 0 {
@@ -92,19 +77,15 @@ func (r *receiver) Ordered(msg *cb.Envelope) (messageBatches [][]*cb.Envelope, p
 		// create new batch with single message
 		messageBatches = append(messageBatches, []*cb.Envelope{msg})
 
-		// Record that this batch took no time to fill
-		r.Metrics.BlockFillDuration.With("channel", r.ChannelID).Observe(0)
-
 		return
 	}
 
-	messageWillOverflowBatchSizeBytes := r.pendingBatchSizeBytes+messageSizeBytes > batchSize.PreferredMaxBytes
+	messageWillOverflowBatchSizeBytes := r.pendingBatchSizeBytes+messageSizeBytes > r.sharedConfigManager.BatchSize().PreferredMaxBytes
 
 	if messageWillOverflowBatchSizeBytes {
 		logger.Debugf("The current message, with %v bytes, will overflow the pending batch of %v bytes.", messageSizeBytes, r.pendingBatchSizeBytes)
 		logger.Debugf("Pending batch would overflow if current message is added, cutting batch now.")
 		messageBatch := r.Cut()
-		r.PendingBatchStartTime = time.Now()
 		messageBatches = append(messageBatches, messageBatch)
 	}
 
@@ -113,7 +94,7 @@ func (r *receiver) Ordered(msg *cb.Envelope) (messageBatches [][]*cb.Envelope, p
 	r.pendingBatchSizeBytes += messageSizeBytes
 	pending = true
 
-	if uint32(len(r.pendingBatch)) >= batchSize.MaxMessageCount {
+	if uint32(len(r.pendingBatch)) >= r.sharedConfigManager.BatchSize().MaxMessageCount {
 		logger.Debugf("Batch size met, cutting batch")
 		messageBatch := r.Cut()
 		messageBatches = append(messageBatches, messageBatch)
@@ -125,8 +106,6 @@ func (r *receiver) Ordered(msg *cb.Envelope) (messageBatches [][]*cb.Envelope, p
 
 // Cut returns the current batch and starts a new one
 func (r *receiver) Cut() []*cb.Envelope {
-	r.Metrics.BlockFillDuration.With("channel", r.ChannelID).Observe(time.Since(r.PendingBatchStartTime).Seconds())
-	r.PendingBatchStartTime = time.Time{}
 	batch := r.pendingBatch
 	r.pendingBatch = nil
 	r.pendingBatchSizeBytes = 0

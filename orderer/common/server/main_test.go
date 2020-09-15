@@ -1,10 +1,14 @@
-// Copyright IBM Corp. All Rights Reserved.
-// SPDX-License-Identifier: Apache-2.0
+/*
+Copyright IBM Corp. 2017 All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+*/
 
 package server
 
 import (
 	"io/ioutil"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -17,31 +21,33 @@ import (
 	"github.com/hyperledger/fabric/bccsp/factory"
 	"github.com/hyperledger/fabric/common/channelconfig"
 	"github.com/hyperledger/fabric/common/flogging"
-	"github.com/hyperledger/fabric/common/flogging/floggingtest"
 	"github.com/hyperledger/fabric/common/localmsp"
-	"github.com/hyperledger/fabric/common/metrics/disabled"
-	"github.com/hyperledger/fabric/common/metrics/prometheus"
-	"github.com/hyperledger/fabric/common/tools/configtxgen/encoder"
 	genesisconfig "github.com/hyperledger/fabric/common/tools/configtxgen/localconfig"
 	"github.com/hyperledger/fabric/core/comm"
-	"github.com/hyperledger/fabric/core/config/configtest"
-	"github.com/hyperledger/fabric/orderer/common/cluster"
+	coreconfig "github.com/hyperledger/fabric/core/config"
 	"github.com/hyperledger/fabric/orderer/common/localconfig"
+	"github.com/op/go-logging"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestInitializeLogging(t *testing.T) {
-	origEnvValue := os.Getenv("FABRIC_LOGGING_SPEC")
-	os.Setenv("FABRIC_LOGGING_SPEC", "foo=debug")
-	initializeLogging()
-	assert.Equal(t, "debug", flogging.Global.Level("foo").String())
-	os.Setenv("FABRIC_LOGGING_SPEC", origEnvValue)
+func init() {
+	flogging.SetModuleLevel(pkgLogID, "DEBUG")
+}
+
+func TestInitializeLoggingLevel(t *testing.T) {
+	initializeLoggingLevel(
+		&config.TopLevel{
+			// We specify the package name here, in contrast to what's expected
+			// in production usage. We do this so as to prevent the unwanted
+			// global log level setting in tests of this package (for example,
+			// the benchmark-related ones) that would occur otherwise.
+			General: config.General{LogLevel: "foo=debug"},
+		},
+	)
+	assert.Equal(t, flogging.GetModuleLevel("foo"), "DEBUG")
 }
 
 func TestInitializeProfilingService(t *testing.T) {
-	origEnvValue := os.Getenv("FABRIC_LOGGING_SPEC")
-	defer os.Setenv("FABRIC_LOGGING_SPEC", origEnvValue)
-	os.Setenv("FABRIC_LOGGING_SPEC", "debug")
 	// get a free random port
 	listenAddr := func() string {
 		l, _ := net.Listen("tcp", "localhost:0")
@@ -49,13 +55,14 @@ func TestInitializeProfilingService(t *testing.T) {
 		return l.Addr().String()
 	}()
 	initializeProfilingService(
-		&localconfig.TopLevel{
-			General: localconfig.General{
-				Profile: localconfig.Profile{
+		&config.TopLevel{
+			General: config.General{
+				LogLevel: "debug",
+				Profile: config.Profile{
 					Enabled: true,
 					Address: listenAddr,
 				}},
-			Kafka: localconfig.Kafka{Verbose: true},
+			Kafka: config.Kafka{Verbose: true},
 		},
 	)
 	time.Sleep(500 * time.Millisecond)
@@ -69,9 +76,9 @@ func TestInitializeProfilingService(t *testing.T) {
 }
 
 func TestInitializeServerConfig(t *testing.T) {
-	conf := &localconfig.TopLevel{
-		General: localconfig.General{
-			TLS: localconfig.TLS{
+	conf := &config.TopLevel{
+		General: config.General{
+			TLS: config.TLS{
 				Enabled:            true,
 				ClientAuthRequired: true,
 				Certificate:        "main.go",
@@ -81,81 +88,58 @@ func TestInitializeServerConfig(t *testing.T) {
 			},
 		},
 	}
-	sc := initializeServerConfig(conf, nil)
-	defaultOpts := comm.DefaultKeepaliveOptions
+	sc := initializeServerConfig(conf)
+	defaultOpts := comm.DefaultKeepaliveOptions()
 	assert.Equal(t, defaultOpts.ServerMinInterval, sc.KaOpts.ServerMinInterval)
 	assert.Equal(t, time.Duration(0), sc.KaOpts.ServerInterval)
 	assert.Equal(t, time.Duration(0), sc.KaOpts.ServerTimeout)
 	testDuration := 10 * time.Second
-	conf.General.Keepalive = localconfig.Keepalive{
+	conf.General.Keepalive = config.Keepalive{
 		ServerMinInterval: testDuration,
 		ServerInterval:    testDuration,
 		ServerTimeout:     testDuration,
 	}
-	sc = initializeServerConfig(conf, nil)
+	sc = initializeServerConfig(conf)
 	assert.Equal(t, testDuration, sc.KaOpts.ServerMinInterval)
 	assert.Equal(t, testDuration, sc.KaOpts.ServerInterval)
 	assert.Equal(t, testDuration, sc.KaOpts.ServerTimeout)
 
-	sc = initializeServerConfig(conf, nil)
-	assert.NotNil(t, sc.Logger)
-	assert.Equal(t, &disabled.Provider{}, sc.MetricsProvider)
-	assert.Len(t, sc.UnaryInterceptors, 2)
-	assert.Len(t, sc.StreamInterceptors, 2)
-
-	sc = initializeServerConfig(conf, &prometheus.Provider{})
-	assert.Equal(t, &prometheus.Provider{}, sc.MetricsProvider)
-
 	goodFile := "main.go"
 	badFile := "does_not_exist"
 
-	oldLogger := logger
-	defer func() { logger = oldLogger }()
-	logger, _ = floggingtest.NewTestLogger(t)
+	logger.SetBackend(logging.AddModuleLevel(newPanicOnCriticalBackend()))
+	defer func() {
+		logger = logging.MustGetLogger("orderer/main")
+	}()
 
 	testCases := []struct {
-		name           string
-		certificate    string
-		privateKey     string
-		rootCA         string
-		clientRootCert string
-		clusterCert    string
-		clusterKey     string
-		clusterCA      string
+		name              string
+		certificate       string
+		privateKey        string
+		rootCA            string
+		clientCertificate string
 	}{
-		{"BadCertificate", badFile, goodFile, goodFile, goodFile, "", "", ""},
-		{"BadPrivateKey", goodFile, badFile, goodFile, goodFile, "", "", ""},
-		{"BadRootCA", goodFile, goodFile, badFile, goodFile, "", "", ""},
-		{"BadClientRootCertificate", goodFile, goodFile, goodFile, badFile, "", "", ""},
-		{"ClusterBadCertificate", goodFile, goodFile, goodFile, goodFile, badFile, goodFile, goodFile},
-		{"ClusterBadPrivateKey", goodFile, goodFile, goodFile, goodFile, goodFile, badFile, goodFile},
-		{"ClusterBadRootCA", goodFile, goodFile, goodFile, goodFile, goodFile, goodFile, badFile},
+		{"BadCertificate", badFile, goodFile, goodFile, goodFile},
+		{"BadPrivateKey", goodFile, badFile, goodFile, goodFile},
+		{"BadRootCA", goodFile, goodFile, badFile, goodFile},
+		{"BadClientCertificate", goodFile, goodFile, goodFile, badFile},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			conf := &localconfig.TopLevel{
-				General: localconfig.General{
-					TLS: localconfig.TLS{
-						Enabled:            true,
-						ClientAuthRequired: true,
-						Certificate:        tc.certificate,
-						PrivateKey:         tc.privateKey,
-						RootCAs:            []string{tc.rootCA},
-						ClientRootCAs:      []string{tc.clientRootCert},
-					},
-					Cluster: localconfig.Cluster{
-						ClientCertificate: tc.clusterCert,
-						ClientPrivateKey:  tc.clusterKey,
-						RootCAs:           []string{tc.clusterCA},
-					},
-				},
-			}
 			assert.Panics(t, func() {
-				if tc.clusterCert == "" {
-					initializeServerConfig(conf, nil)
-				} else {
-					initializeClusterConfig(conf)
-				}
+				initializeServerConfig(
+					&config.TopLevel{
+						General: config.General{
+							TLS: config.TLS{
+								Enabled:            true,
+								ClientAuthRequired: true,
+								Certificate:        tc.certificate,
+								PrivateKey:         tc.privateKey,
+								RootCAs:            []string{tc.rootCA},
+								ClientRootCAs:      []string{tc.clientCertificate},
+							},
+						},
+					})
 			},
 			)
 		})
@@ -163,9 +147,6 @@ func TestInitializeServerConfig(t *testing.T) {
 }
 
 func TestInitializeBootstrapChannel(t *testing.T) {
-	cleanup := configtest.SetDevFabricConfigPath(t)
-	defer cleanup()
-
 	testCases := []struct {
 		genesisMethod string
 		ledgerType    string
@@ -184,16 +165,16 @@ func TestInitializeBootstrapChannel(t *testing.T) {
 
 			fileLedgerLocation, _ := ioutil.TempDir("", "test-ledger")
 			ledgerFactory, _ := createLedgerFactory(
-				&localconfig.TopLevel{
-					General: localconfig.General{LedgerType: tc.ledgerType},
-					FileLedger: localconfig.FileLedger{
+				&config.TopLevel{
+					General: config.General{LedgerType: tc.ledgerType},
+					FileLedger: config.FileLedger{
 						Location: fileLedgerLocation,
 					},
 				},
 			)
 
-			bootstrapConfig := &localconfig.TopLevel{
-				General: localconfig.General{
+			bootstrapConfig := &config.TopLevel{
+				General: config.General{
 					GenesisMethod:  tc.genesisMethod,
 					GenesisProfile: "SampleSingleMSPSolo",
 					GenesisFile:    "genesisblock",
@@ -203,13 +184,11 @@ func TestInitializeBootstrapChannel(t *testing.T) {
 
 			if tc.panics {
 				assert.Panics(t, func() {
-					genesisBlock := extractBootstrapBlock(bootstrapConfig)
-					initializeBootstrapChannel(genesisBlock, ledgerFactory)
+					initializeBootstrapChannel(bootstrapConfig, ledgerFactory)
 				})
 			} else {
 				assert.NotPanics(t, func() {
-					genesisBlock := extractBootstrapBlock(bootstrapConfig)
-					initializeBootstrapChannel(genesisBlock, ledgerFactory)
+					initializeBootstrapChannel(bootstrapConfig, ledgerFactory)
 				})
 			}
 		})
@@ -219,12 +198,12 @@ func TestInitializeBootstrapChannel(t *testing.T) {
 func TestInitializeLocalMsp(t *testing.T) {
 	t.Run("Happy", func(t *testing.T) {
 		assert.NotPanics(t, func() {
-			localMSPDir, _ := configtest.GetDevMspDir()
+			localMSPDir, _ := coreconfig.GetDevMspDir()
 			initializeLocalMsp(
-				&localconfig.TopLevel{
-					General: localconfig.General{
+				&config.TopLevel{
+					General: config.General{
 						LocalMSPDir: localMSPDir,
-						LocalMSPID:  "SampleOrg",
+						LocalMSPID:  "DEFAULT",
 						BCCSP: &factory.FactoryOpts{
 							ProviderName: "SW",
 							SwOpts: &factory.SwOpts{
@@ -238,14 +217,14 @@ func TestInitializeLocalMsp(t *testing.T) {
 		})
 	})
 	t.Run("Error", func(t *testing.T) {
-		oldLogger := logger
-		defer func() { logger = oldLogger }()
-		logger, _ = floggingtest.NewTestLogger(t)
-
+		logger.SetBackend(logging.AddModuleLevel(newPanicOnCriticalBackend()))
+		defer func() {
+			logger = logging.MustGetLogger("orderer/main")
+		}()
 		assert.Panics(t, func() {
 			initializeLocalMsp(
-				&localconfig.TopLevel{
-					General: localconfig.General{
+				&config.TopLevel{
+					General: config.General{
 						LocalMSPDir: "",
 						LocalMSPID:  "",
 					},
@@ -255,14 +234,10 @@ func TestInitializeLocalMsp(t *testing.T) {
 }
 
 func TestInitializeMultiChainManager(t *testing.T) {
-	cleanup := configtest.SetDevFabricConfigPath(t)
-	defer cleanup()
 	conf := genesisConfig(t)
 	assert.NotPanics(t, func() {
 		initializeLocalMsp(conf)
-		lf, _ := createLedgerFactory(conf)
-		bootBlock := encoder.New(genesisconfig.Load(genesisconfig.SampleDevModeSoloProfile)).GenesisBlockForChannel("system")
-		initializeMultichannelRegistrar(bootBlock, &cluster.PredicateDialer{}, comm.ServerConfig{}, nil, conf, localmsp.NewSigner(), &disabled.Provider{}, lf)
+		initializeMultichannelRegistrar(conf, localmsp.NewSigner())
 	})
 }
 
@@ -275,25 +250,23 @@ func TestInitializeGrpcServer(t *testing.T) {
 	}()
 	host := strings.Split(listenAddr, ":")[0]
 	port, _ := strconv.ParseUint(strings.Split(listenAddr, ":")[1], 10, 16)
-	conf := &localconfig.TopLevel{
-		General: localconfig.General{
+	conf := &config.TopLevel{
+		General: config.General{
 			ListenAddress: host,
 			ListenPort:    uint16(port),
-			TLS: localconfig.TLS{
+			TLS: config.TLS{
 				Enabled:            false,
 				ClientAuthRequired: false,
 			},
 		},
 	}
 	assert.NotPanics(t, func() {
-		grpcServer := initializeGrpcServer(conf, initializeServerConfig(conf, nil))
+		grpcServer := initializeGrpcServer(conf, initializeServerConfig(conf))
 		grpcServer.Listener().Close()
 	})
 }
 
 func TestUpdateTrustedRoots(t *testing.T) {
-	cleanup := configtest.SetDevFabricConfigPath(t)
-	defer cleanup()
 	initializeLocalMsp(genesisConfig(t))
 	// get a free random port
 	listenAddr := func() string {
@@ -302,17 +275,17 @@ func TestUpdateTrustedRoots(t *testing.T) {
 		return l.Addr().String()
 	}()
 	port, _ := strconv.ParseUint(strings.Split(listenAddr, ":")[1], 10, 16)
-	conf := &localconfig.TopLevel{
-		General: localconfig.General{
+	conf := &config.TopLevel{
+		General: config.General{
 			ListenAddress: "localhost",
 			ListenPort:    uint16(port),
-			TLS: localconfig.TLS{
+			TLS: config.TLS{
 				Enabled:            false,
 				ClientAuthRequired: false,
 			},
 		},
 	}
-	grpcServer := initializeGrpcServer(conf, initializeServerConfig(conf, nil))
+	grpcServer := initializeGrpcServer(conf, initializeServerConfig(conf))
 	caSupport := &comm.CASupport{
 		AppRootCAsByChain:     make(map[string][][]byte),
 		OrdererRootCAsByChain: make(map[string][][]byte),
@@ -323,9 +296,7 @@ func TestUpdateTrustedRoots(t *testing.T) {
 			updateTrustedRoots(grpcServer, caSupport, bundle)
 		}
 	}
-	lf, _ := createLedgerFactory(conf)
-	bootBlock := encoder.New(genesisconfig.Load(genesisconfig.SampleDevModeSoloProfile)).GenesisBlockForChannel("system")
-	initializeMultichannelRegistrar(bootBlock, &cluster.PredicateDialer{}, comm.ServerConfig{}, nil, genesisConfig(t), localmsp.NewSigner(), &disabled.Provider{}, lf, callback)
+	initializeMultichannelRegistrar(genesisConfig(t), localmsp.NewSigner(), callback)
 	t.Logf("# app CAs: %d", len(caSupport.AppRootCAsByChain[genesisconfig.TestChainID]))
 	t.Logf("# orderer CAs: %d", len(caSupport.OrdererRootCAsByChain[genesisconfig.TestChainID]))
 	// mutual TLS not required so no updates should have occurred
@@ -333,11 +304,11 @@ func TestUpdateTrustedRoots(t *testing.T) {
 	assert.Equal(t, 0, len(caSupport.OrdererRootCAsByChain[genesisconfig.TestChainID]))
 	grpcServer.Listener().Close()
 
-	conf = &localconfig.TopLevel{
-		General: localconfig.General{
+	conf = &config.TopLevel{
+		General: config.General{
 			ListenAddress: "localhost",
 			ListenPort:    uint16(port),
-			TLS: localconfig.TLS{
+			TLS: config.TLS{
 				Enabled:            true,
 				ClientAuthRequired: true,
 				PrivateKey:         filepath.Join(".", "testdata", "tls", "server.key"),
@@ -345,45 +316,38 @@ func TestUpdateTrustedRoots(t *testing.T) {
 			},
 		},
 	}
-	grpcServer = initializeGrpcServer(conf, initializeServerConfig(conf, nil))
+	grpcServer = initializeGrpcServer(conf, initializeServerConfig(conf))
 	caSupport = &comm.CASupport{
 		AppRootCAsByChain:     make(map[string][][]byte),
 		OrdererRootCAsByChain: make(map[string][][]byte),
 	}
-
-	predDialer := &cluster.PredicateDialer{}
-	clusterConf := initializeClusterConfig(conf)
-	predDialer.SetConfig(clusterConf)
-
 	callback = func(bundle *channelconfig.Bundle) {
 		if grpcServer.MutualTLSRequired() {
 			t.Log("callback called")
 			updateTrustedRoots(grpcServer, caSupport, bundle)
-			updateClusterDialer(caSupport, predDialer, clusterConf.SecOpts.ServerRootCAs)
 		}
 	}
-	initializeMultichannelRegistrar(bootBlock, &cluster.PredicateDialer{}, comm.ServerConfig{}, nil, genesisConfig(t), localmsp.NewSigner(), &disabled.Provider{}, lf, callback)
+	initializeMultichannelRegistrar(genesisConfig(t), localmsp.NewSigner(), callback)
 	t.Logf("# app CAs: %d", len(caSupport.AppRootCAsByChain[genesisconfig.TestChainID]))
 	t.Logf("# orderer CAs: %d", len(caSupport.OrdererRootCAsByChain[genesisconfig.TestChainID]))
 	// mutual TLS is required so updates should have occurred
 	// we expect an intermediate and root CA for apps and orderers
 	assert.Equal(t, 2, len(caSupport.AppRootCAsByChain[genesisconfig.TestChainID]))
 	assert.Equal(t, 2, len(caSupport.OrdererRootCAsByChain[genesisconfig.TestChainID]))
-	assert.Len(t, predDialer.Config.Load().(comm.ClientConfig).SecOpts.ServerRootCAs, 2)
 	grpcServer.Listener().Close()
 }
 
-func genesisConfig(t *testing.T) *localconfig.TopLevel {
+func genesisConfig(t *testing.T) *config.TopLevel {
 	t.Helper()
-	localMSPDir, _ := configtest.GetDevMspDir()
-	return &localconfig.TopLevel{
-		General: localconfig.General{
+	localMSPDir, _ := coreconfig.GetDevMspDir()
+	return &config.TopLevel{
+		General: config.General{
 			LedgerType:     "ram",
 			GenesisMethod:  "provisional",
 			GenesisProfile: "SampleDevModeSolo",
 			SystemChannel:  genesisconfig.TestChainID,
 			LocalMSPDir:    localMSPDir,
-			LocalMSPID:     "SampleOrg",
+			LocalMSPID:     "DEFAULT",
 			BCCSP: &factory.FactoryOpts{
 				ProviderName: "SW",
 				SwOpts: &factory.SwOpts{
@@ -394,4 +358,22 @@ func genesisConfig(t *testing.T) *localconfig.TopLevel {
 			},
 		},
 	}
+}
+
+func newPanicOnCriticalBackend() *panicOnCriticalBackend {
+	return &panicOnCriticalBackend{
+		backend: logging.AddModuleLevel(logging.NewLogBackend(os.Stderr, "", log.LstdFlags)),
+	}
+}
+
+type panicOnCriticalBackend struct {
+	backend logging.Backend
+}
+
+func (b *panicOnCriticalBackend) Log(level logging.Level, calldepth int, record *logging.Record) error {
+	err := b.backend.Log(level, calldepth, record)
+	if level == logging.CRITICAL {
+		panic(record.Formatted(calldepth))
+	}
+	return err
 }

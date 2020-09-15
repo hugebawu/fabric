@@ -1,7 +1,17 @@
 /*
-Copyright IBM Corp. All Rights Reserved.
+Copyright IBM Corp. 2016 All Rights Reserved.
 
-SPDX-License-Identifier: Apache-2.0
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+		 http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
 
 package utils_test
@@ -12,12 +22,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"reflect"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/util"
-	"github.com/hyperledger/fabric/core/chaincode/platforms"
-	"github.com/hyperledger/fabric/core/chaincode/platforms/golang"
 	"github.com/hyperledger/fabric/msp"
 	mspmgmt "github.com/hyperledger/fabric/msp/mgmt"
 	"github.com/hyperledger/fabric/msp/mgmt/testtools"
@@ -54,7 +63,7 @@ func TestBadProposalHeaders(t *testing.T) {
 	// in multiple functions which should be refactored in the future.
 	// For now, simply consolidating the test cases
 
-	// empty header
+	// emty header
 	prop := &pb.Proposal{
 		Header: []byte{},
 	}
@@ -62,13 +71,6 @@ func TestBadProposalHeaders(t *testing.T) {
 	assert.Error(t, err, "Expected error with empty proposal header")
 	_, err = utils.ComputeProposalBinding(prop)
 	assert.Error(t, err, "Expected error with empty proposal header")
-
-	// empty payload
-	prop = &pb.Proposal{
-		Header: []byte("header"),
-	}
-	_, _, err = utils.GetChaincodeProposalContext(prop)
-	assert.Error(t, err, "Expected error with empty proposal payload")
 
 	// malformed proposal header
 	prop = &pb.Proposal{
@@ -116,7 +118,6 @@ func TestBadProposalHeaders(t *testing.T) {
 	prop.Header = hdrBytes
 	_, _, err = utils.GetChaincodeProposalContext(prop)
 	assert.Error(t, err, "Expected error with wrong header type")
-	assert.Contains(t, err.Error(), "invalid proposal: invalid channel header type")
 	_, err = utils.GetNonce(prop)
 	assert.Error(t, err, "Expected error with wrong header type")
 
@@ -166,9 +167,7 @@ func TestGetNonce(t *testing.T) {
 }
 
 func TestGetChaincodeDeploymentSpec(t *testing.T) {
-	pr := platforms.NewRegistry(&golang.Platform{})
-
-	_, err := utils.GetChaincodeDeploymentSpec([]byte("bad spec"), pr)
+	_, err := utils.GetChaincodeDeploymentSpec([]byte("bad spec"))
 	assert.Error(t, err, "Expected error with malformed spec")
 
 	cds, _ := proto.Marshal(&pb.ChaincodeDeploymentSpec{
@@ -176,7 +175,7 @@ func TestGetChaincodeDeploymentSpec(t *testing.T) {
 			Type: pb.ChaincodeSpec_GOLANG,
 		},
 	})
-	_, err = utils.GetChaincodeDeploymentSpec(cds, pr)
+	_, err = utils.GetChaincodeDeploymentSpec(cds)
 	assert.NoError(t, err, "Unexpected error getting deployment spec")
 
 	cds, _ = proto.Marshal(&pb.ChaincodeDeploymentSpec{
@@ -184,7 +183,7 @@ func TestGetChaincodeDeploymentSpec(t *testing.T) {
 			Type: pb.ChaincodeSpec_UNDEFINED,
 		},
 	})
-	_, err = utils.GetChaincodeDeploymentSpec(cds, pr)
+	_, err = utils.GetChaincodeDeploymentSpec(cds)
 	assert.Error(t, err, "Expected error with invalid spec type")
 
 }
@@ -217,7 +216,7 @@ func TestCDSProposals(t *testing.T) {
 	assert.NotEqual(t, "", txid, "txid should not be empty")
 
 	// upgrade
-	prop, txid, err = utils.CreateUpgradeProposalFromCDS(chainID, cds, creator, policy, escc, vscc, nil)
+	prop, txid, err = utils.CreateUpgradeProposalFromCDS(chainID, cds, creator, policy, escc, vscc)
 	assert.NotNil(t, prop, "Upgrade proposal should not be nil")
 	assert.NoError(t, err, "Unexpected error creating upgrade proposal")
 	assert.NotEqual(t, "", txid, "txid should not be empty")
@@ -270,7 +269,7 @@ func TestProposal(t *testing.T) {
 		t.Fatalf("Could not deserialize the chaincode proposal, err %s\n", err)
 		return
 	}
-	if !proto.Equal(prop, propBack) {
+	if !reflect.DeepEqual(prop, propBack) {
 		t.Fatalf("Proposal and deserialized proposals don't match\n")
 		return
 	}
@@ -357,33 +356,6 @@ func TestProposal(t *testing.T) {
 		t.Fatalf("Failed checking Transient field. Invalid value, expectext 'transient', got [%s]", string(value))
 		return
 	}
-}
-
-func TestProposalWithTxID(t *testing.T) {
-	// create a proposal from a ChaincodeInvocationSpec
-	prop, txid, err := utils.CreateChaincodeProposalWithTxIDAndTransient(
-		common.HeaderType_ENDORSER_TRANSACTION,
-		util.GetTestChainID(),
-		createCIS(),
-		[]byte("creator"),
-		"testtx",
-		map[string][]byte{"certx": []byte("transient")},
-	)
-	assert.Nil(t, err)
-	assert.NotNil(t, prop)
-	assert.Equal(t, txid, "testtx")
-
-	prop, txid, err = utils.CreateChaincodeProposalWithTxIDAndTransient(
-		common.HeaderType_ENDORSER_TRANSACTION,
-		util.GetTestChainID(),
-		createCIS(),
-		[]byte("creator"),
-		"",
-		map[string][]byte{"certx": []byte("transient")},
-	)
-	assert.Nil(t, err)
-	assert.NotNil(t, prop)
-	assert.NotEmpty(t, txid)
 }
 
 func TestProposalResponse(t *testing.T) {
@@ -606,22 +578,22 @@ func TestProposalTxID(t *testing.T) {
 	nonce := []byte{1}
 	creator := []byte{2}
 
-	txid, err := utils.ComputeTxID(nonce, creator)
+	txid, err := utils.ComputeProposalTxID(nonce, creator)
 	assert.NotEmpty(t, txid, "TxID cannot be empty.")
 	assert.NoError(t, err, "Failed computing txID")
-	assert.Nil(t, utils.CheckTxID(txid, nonce, creator))
-	assert.Error(t, utils.CheckTxID("", nonce, creator))
+	assert.Nil(t, utils.CheckProposalTxID(txid, nonce, creator))
+	assert.Error(t, utils.CheckProposalTxID("", nonce, creator))
 
-	txid, err = utils.ComputeTxID(nil, nil)
+	txid, err = utils.ComputeProposalTxID(nil, nil)
 	assert.NotEmpty(t, txid, "TxID cannot be empty.")
 	assert.NoError(t, err, "Failed computing txID")
 }
 
 func TestComputeProposalTxID(t *testing.T) {
-	txid, err := utils.ComputeTxID([]byte{1}, []byte{1})
+	txid, err := utils.ComputeProposalTxID([]byte{1}, []byte{1})
 	assert.NoError(t, err, "Failed computing TxID")
 
-	// Compute the function computed by ComputeTxID,
+	// Compute the function computed by ComputeProposalTxID,
 	// namely, base64(sha256(nonce||creator))
 	hf := sha256.New()
 	hf.Write([]byte{1})

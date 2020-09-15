@@ -9,24 +9,23 @@ package encoder
 import (
 	"testing"
 
-	"github.com/golang/protobuf/proto"
+	"github.com/hyperledger/fabric/common/capabilities"
 	"github.com/hyperledger/fabric/common/channelconfig"
 	"github.com/hyperledger/fabric/common/configtx"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/common/localmsp"
-	"github.com/hyperledger/fabric/common/tools/configtxgen/configtxgentest"
 	genesisconfig "github.com/hyperledger/fabric/common/tools/configtxgen/localconfig"
-	msptesttools "github.com/hyperledger/fabric/msp/mgmt/testtools"
+	mspmgmt "github.com/hyperledger/fabric/msp/mgmt"
 	cb "github.com/hyperledger/fabric/protos/common"
-	ab "github.com/hyperledger/fabric/protos/orderer"
-	"github.com/hyperledger/fabric/protos/orderer/etcdraft"
+	pb "github.com/hyperledger/fabric/protos/peer"
 	"github.com/hyperledger/fabric/protos/utils"
+
+	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func init() {
-	flogging.ActivateSpec("common.tools.configtxgen.encoder=DEBUG")
+	flogging.SetModuleLevel(pkgLogID, "DEBUG")
 }
 
 func hasModPolicySet(t *testing.T, groupName string, cg *cb.ConfigGroup) {
@@ -49,13 +48,15 @@ func TestConfigParsing(t *testing.T) {
 	for _, profile := range []string{
 		genesisconfig.SampleInsecureSoloProfile,
 		genesisconfig.SampleSingleMSPSoloProfile,
+		genesisconfig.SampleSingleMSPSoloV11Profile,
 		genesisconfig.SampleDevModeSoloProfile,
 		genesisconfig.SampleInsecureKafkaProfile,
 		genesisconfig.SampleSingleMSPKafkaProfile,
+		genesisconfig.SampleSingleMSPKafkaV11Profile,
 		genesisconfig.SampleDevModeKafkaProfile,
 	} {
 		t.Run(profile, func(t *testing.T) {
-			config := configtxgentest.Load(profile)
+			config := genesisconfig.Load(profile)
 			group, err := NewChannelGroup(config)
 			assert.NoError(t, err)
 			assert.NotNil(t, group)
@@ -71,47 +72,86 @@ func TestConfigParsing(t *testing.T) {
 }
 
 func TestGoodChannelCreateConfigUpdate(t *testing.T) {
-	createConfig := configtxgentest.Load(genesisconfig.SampleSingleMSPChannelProfile)
-
-	configUpdate, err := NewChannelCreateConfigUpdate("channel.id", createConfig)
+	config := genesisconfig.Load(genesisconfig.SampleDevModeSoloProfile)
+	systemChannel, err := NewChannelGroup(config)
 	assert.NoError(t, err)
-	assert.NotNil(t, configUpdate)
-}
+	assert.NotNil(t, systemChannel)
 
-func TestGoodChannelCreateNoAnchorPeers(t *testing.T) {
-	createConfig := configtxgentest.Load(genesisconfig.SampleSingleMSPChannelProfile)
-	createConfig.Application.Organizations[0].AnchorPeers = nil
+	createConfig := genesisconfig.Load(genesisconfig.SampleSingleMSPChannelProfile)
 
-	configUpdate, err := NewChannelCreateConfigUpdate("channel.id", createConfig)
+	configUpdate, err := NewChannelCreateConfigUpdate("channel.id", nil, createConfig)
 	assert.NoError(t, err)
 	assert.NotNil(t, configUpdate)
 
-	// Anchor peers should not be set
-	assert.True(t, proto.Equal(
-		configUpdate.WriteSet.Groups["Application"].Groups["SampleOrg"],
-		&cb.ConfigGroup{},
-	))
+	defaultConfigUpdate, err := NewChannelCreateConfigUpdate("channel.id", systemChannel, createConfig)
+	assert.NoError(t, err)
+	assert.NotNil(t, configUpdate)
+
+	assert.True(t, proto.Equal(configUpdate, defaultConfigUpdate), "the config used has had no updates, so should equal default")
 }
 
 func TestChannelCreateWithResources(t *testing.T) {
 	t.Run("AtV1.0", func(t *testing.T) {
-		createConfig := configtxgentest.Load(genesisconfig.SampleSingleMSPChannelProfile)
-		createConfig.Application.Capabilities = nil
+		createConfig := genesisconfig.Load(genesisconfig.SampleSingleMSPChannelProfile)
 
-		configUpdate, err := NewChannelCreateConfigUpdate("channel.id", createConfig)
+		configUpdate, err := NewChannelCreateConfigUpdate("channel.id", nil, createConfig)
 		assert.NoError(t, err)
 		assert.NotNil(t, configUpdate)
 		assert.Nil(t, configUpdate.IsolatedData)
+	})
+
+	t.Run("AtV1.1", func(t *testing.T) {
+		createConfig := genesisconfig.Load(genesisconfig.SampleSingleMSPChannelV11Profile)
+		createConfig.Application.Capabilities[capabilities.ApplicationResourcesTreeExperimental] = true
+
+		configUpdate, err := NewChannelCreateConfigUpdate("channel.id", nil, createConfig)
+		assert.NoError(t, err)
+		assert.NotNil(t, configUpdate)
+		assert.NotNil(t, configUpdate.IsolatedData)
+		assert.NotEmpty(t, configUpdate.IsolatedData[pb.ResourceConfigSeedDataKey])
+	})
+
+}
+
+func TestNegativeChannelCreateConfigUpdate(t *testing.T) {
+	config := genesisconfig.Load(genesisconfig.SampleDevModeSoloProfile)
+	channelConfig := genesisconfig.Load(genesisconfig.SampleSingleMSPChannelProfile)
+	group, err := NewChannelGroup(config)
+	assert.NoError(t, err)
+	assert.NotNil(t, group)
+
+	t.Run("NoGroups", func(t *testing.T) {
+		channelGroup := proto.Clone(group).(*cb.ConfigGroup)
+		channelGroup.Groups = nil
+		_, err := NewChannelCreateConfigUpdate("channel.id", &cb.ConfigGroup{}, channelConfig)
+		assert.Error(t, err)
+		assert.Regexp(t, "missing all channel groups", err.Error())
+	})
+
+	t.Run("NoConsortiumsGroup", func(t *testing.T) {
+		channelGroup := proto.Clone(group).(*cb.ConfigGroup)
+		delete(channelGroup.Groups, channelconfig.ConsortiumsGroupKey)
+		_, err := NewChannelCreateConfigUpdate("channel.id", channelGroup, channelConfig)
+		assert.Error(t, err)
+		assert.Regexp(t, "bad consortiums group", err.Error())
+	})
+
+	t.Run("NoConsortiums", func(t *testing.T) {
+		channelGroup := proto.Clone(group).(*cb.ConfigGroup)
+		delete(channelGroup.Groups[channelconfig.ConsortiumsGroupKey].Groups, genesisconfig.SampleConsortiumName)
+		_, err := NewChannelCreateConfigUpdate("channel.id", channelGroup, channelConfig)
+		assert.Error(t, err)
+		assert.Regexp(t, "bad consortium:", err.Error())
 	})
 }
 
 func TestMakeChannelCreationTransactionWithSigner(t *testing.T) {
 	channelID := "foo"
 
-	msptesttools.LoadDevMsp()
+	mspmgmt.LoadDevMsp()
 	signer := localmsp.NewSigner()
 
-	cct, err := MakeChannelCreationTransaction(channelID, signer, configtxgentest.Load(genesisconfig.SampleSingleMSPChannelProfile))
+	cct, err := MakeChannelCreationTransaction(channelID, signer, nil, genesisconfig.Load(genesisconfig.SampleSingleMSPChannelV11Profile))
 	assert.NoError(t, err, "Making chain creation tx")
 
 	assert.NotEmpty(t, cct.Signature, "Should have signature")
@@ -131,7 +171,7 @@ func TestMakeChannelCreationTransactionWithSigner(t *testing.T) {
 
 func TestMakeChannelCreationTransactionNoSigner(t *testing.T) {
 	channelID := "foo"
-	cct, err := MakeChannelCreationTransaction(channelID, nil, configtxgentest.Load(genesisconfig.SampleSingleMSPChannelProfile))
+	cct, err := MakeChannelCreationTransaction(channelID, nil, nil, genesisconfig.Load(genesisconfig.SampleSingleMSPChannelProfile))
 	assert.NoError(t, err, "Making chain creation tx")
 
 	assert.Empty(t, cct.Signature, "Should have empty signature")
@@ -151,25 +191,14 @@ func TestMakeChannelCreationTransactionNoSigner(t *testing.T) {
 
 func TestNewApplicationGroup(t *testing.T) {
 	t.Run("Application with capabilities", func(t *testing.T) {
-		config := configtxgentest.Load(genesisconfig.SampleSingleMSPChannelProfile)
-		group, err := NewApplicationGroup(config.Application)
-		assert.NoError(t, err)
-		assert.NotNil(t, group)
-	})
-
-	t.Run("Application missing policies", func(t *testing.T) {
-		config := configtxgentest.Load(genesisconfig.SampleSingleMSPChannelProfile)
-		config.Application.Policies = nil
-		for _, org := range config.Application.Organizations {
-			org.Policies = nil
-		}
+		config := genesisconfig.Load(genesisconfig.SampleSingleMSPChannelV11Profile)
 		group, err := NewApplicationGroup(config.Application)
 		assert.NoError(t, err)
 		assert.NotNil(t, group)
 	})
 
 	t.Run("Application unknown MSP", func(t *testing.T) {
-		config := configtxgentest.Load(genesisconfig.SampleSingleMSPChannelProfile)
+		config := genesisconfig.Load(genesisconfig.SampleSingleMSPChannelV11Profile)
 		config.Application.Organizations[0] = &genesisconfig.Organization{Name: "FakeOrg", ID: "FakeOrg"}
 		group, err := NewApplicationGroup(config.Application)
 		assert.Error(t, err)
@@ -179,7 +208,7 @@ func TestNewApplicationGroup(t *testing.T) {
 
 func TestNewChannelGroup(t *testing.T) {
 	t.Run("Nil orderer", func(t *testing.T) {
-		config := configtxgentest.Load(genesisconfig.SampleDevModeSoloProfile)
+		config := genesisconfig.Load(genesisconfig.SampleDevModeSoloProfile)
 		config.Orderer = nil
 		group, err := NewChannelGroup(config)
 		assert.Error(t, err)
@@ -187,23 +216,15 @@ func TestNewChannelGroup(t *testing.T) {
 	})
 
 	t.Run("Add test consortium", func(t *testing.T) {
-		config := configtxgentest.Load(genesisconfig.SampleDevModeSoloProfile)
+		config := genesisconfig.Load(genesisconfig.SampleDevModeSoloProfile)
 		config.Consortium = "Test"
 		group, err := NewChannelGroup(config)
 		assert.NoError(t, err)
 		assert.NotNil(t, group)
 	})
 
-	t.Run("Channel missing policies", func(t *testing.T) {
-		config := configtxgentest.Load(genesisconfig.SampleDevModeSoloProfile)
-		config.Policies = nil
-		group, err := NewChannelGroup(config)
-		assert.NoError(t, err)
-		assert.NotNil(t, group)
-	})
-
 	t.Run("Add application unknown MSP", func(t *testing.T) {
-		config := configtxgentest.Load(genesisconfig.SampleDevModeSoloProfile)
+		config := genesisconfig.Load(genesisconfig.SampleDevModeSoloProfile)
 		config.Application = &genesisconfig.Application{Organizations: []*genesisconfig.Organization{{Name: "FakeOrg"}}}
 		group, err := NewChannelGroup(config)
 		assert.Error(t, err)
@@ -211,7 +232,7 @@ func TestNewChannelGroup(t *testing.T) {
 	})
 
 	t.Run("Add consortiums unknown MSP", func(t *testing.T) {
-		config := configtxgentest.Load(genesisconfig.SampleDevModeSoloProfile)
+		config := genesisconfig.Load(genesisconfig.SampleDevModeSoloProfile)
 		config.Consortiums["fakeorg"] = &genesisconfig.Consortium{Organizations: []*genesisconfig.Organization{{Name: "FakeOrg"}}}
 		group, err := NewChannelGroup(config)
 		assert.Error(t, err)
@@ -219,7 +240,7 @@ func TestNewChannelGroup(t *testing.T) {
 	})
 
 	t.Run("Add orderer unknown MSP", func(t *testing.T) {
-		config := configtxgentest.Load(genesisconfig.SampleDevModeSoloProfile)
+		config := genesisconfig.Load(genesisconfig.SampleDevModeSoloProfile)
 		config.Orderer = &genesisconfig.Orderer{Organizations: []*genesisconfig.Organization{{Name: "FakeOrg"}}}
 		group, err := NewChannelGroup(config)
 		assert.Error(t, err)
@@ -229,53 +250,24 @@ func TestNewChannelGroup(t *testing.T) {
 
 func TestNewOrdererGroup(t *testing.T) {
 	t.Run("Unknown orderer type", func(t *testing.T) {
-		config := configtxgentest.Load(genesisconfig.SampleDevModeSoloProfile)
+		config := genesisconfig.Load(genesisconfig.SampleDevModeSoloProfile)
 		config.Orderer.OrdererType = "TestOrderer"
 		group, err := NewOrdererGroup(config.Orderer)
 		assert.Error(t, err)
 		assert.Nil(t, group)
 	})
 
-	t.Run("Orderer missing policies", func(t *testing.T) {
-		config := configtxgentest.Load(genesisconfig.SampleDevModeSoloProfile)
-		config.Orderer.Policies = nil
-		for _, org := range config.Orderer.Organizations {
-			org.Policies = nil
-		}
-		group, err := NewOrdererGroup(config.Orderer)
-		assert.NoError(t, err)
-		assert.NotNil(t, group)
-	})
-
 	t.Run("Unknown MSP org", func(t *testing.T) {
-		config := configtxgentest.Load(genesisconfig.SampleDevModeSoloProfile)
+		config := genesisconfig.Load(genesisconfig.SampleDevModeSoloProfile)
 		config.Orderer.Organizations[0] = &genesisconfig.Organization{Name: "FakeOrg", ID: "FakeOrg"}
 		group, err := NewOrdererGroup(config.Orderer)
 		assert.Error(t, err)
 		assert.Nil(t, group)
 	})
-
-	t.Run("etcd/raft-based Orderer", func(t *testing.T) {
-		t.Skip()
-		config := configtxgentest.Load(genesisconfig.SampleDevModeEtcdRaftProfile)
-		group, _ := NewOrdererGroup(config.Orderer)
-		consensusType := group.GetValues()[channelconfig.ConsensusTypeKey]
-		packedType := consensusType.GetValue()
-		unpackedType := new(ab.ConsensusType)
-		err := proto.Unmarshal(packedType, unpackedType)
-		require.NoError(t, err, "cannot extract %s config value from orderer group", channelconfig.ConsensusTypeKey)
-		unpackedMetadata := new(etcdraft.Metadata)
-		err = proto.Unmarshal(unpackedType.GetMetadata(), unpackedMetadata)
-		require.NoError(t, err, "cannot extract metadata value from %s consenters", etcdraft.TypeKey)
-		for _, v := range unpackedMetadata.GetConsenters() {
-			// Checking one field for a non-nil value should be enough.
-			require.NotNil(t, v.GetClientTlsCert(), "cannot extract PEM-encoded client certificate of consenter")
-		}
-	})
 }
 
 func TestBootstrapper(t *testing.T) {
-	config := configtxgentest.Load(genesisconfig.SampleDevModeSoloProfile)
+	config := genesisconfig.Load(genesisconfig.SampleDevModeSoloProfile)
 	t.Run("New bootstrapper", func(t *testing.T) {
 		bootstrapper := New(config)
 		assert.NotNil(t, bootstrapper.GenesisBlock(), "genesis block should not be nil")

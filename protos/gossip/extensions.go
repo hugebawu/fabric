@@ -440,9 +440,6 @@ func (m *SignedGossipMessage) IsSigned() bool {
 // SignedGossipMessage out of it.
 // Returns an error if un-marshaling fails.
 func (e *Envelope) ToGossipMessage() (*SignedGossipMessage, error) {
-	if e == nil {
-		return nil, errors.New("nil envelope")
-	}
 	msg := &GossipMessage{}
 	err := proto.Unmarshal(e.Payload, msg)
 	if err != nil {
@@ -552,15 +549,14 @@ func (dd *DataRequest) FormattedDigests() []string {
 	if dd.MsgType == PullMsgType_IDENTITY_MSG {
 		return digestsToHex(dd.Digests)
 	}
-
-	return digestsAsStrings(dd.Digests)
+	return dd.Digests
 }
 
 func (dd *DataDigest) FormattedDigests() []string {
 	if dd.MsgType == PullMsgType_IDENTITY_MSG {
 		return digestsToHex(dd.Digests)
 	}
-	return digestsAsStrings(dd.Digests)
+	return dd.Digests
 }
 
 // Hash returns the SHA256 representation of the PvtDataDigest's bytes
@@ -581,18 +577,10 @@ func (res *RemotePvtDataResponse) ToString() string {
 	return fmt.Sprintf("%v", a)
 }
 
-func digestsAsStrings(digests [][]byte) []string {
+func digestsToHex(digests []string) []string {
 	a := make([]string, len(digests))
 	for i, dig := range digests {
-		a[i] = string(dig)
-	}
-	return a
-}
-
-func digestsToHex(digests [][]byte) []string {
-	a := make([]string, len(digests))
-	for i, dig := range digests {
-		a[i] = hex.EncodeToString(dig)
+		a[i] = hex.EncodeToString([]byte(dig))
 	}
 	return a
 }
@@ -603,7 +591,8 @@ func (msg *StateInfo) LedgerHeight() (uint64, error) {
 	if msg.Properties != nil {
 		return msg.Properties.LedgerHeight, nil
 	}
-	return 0, errors.New("properties undefined")
+	metaState, err := common.FromBytes(msg.Metadata)
+	return metaState.LedgerHeight, err
 }
 
 // Abs returns abs(a-b)

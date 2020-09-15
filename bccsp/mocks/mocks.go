@@ -17,11 +17,12 @@ limitations under the License.
 package mocks
 
 import (
-	"bytes"
 	"crypto"
 	"errors"
 	"hash"
 	"reflect"
+
+	"bytes"
 
 	"github.com/hyperledger/fabric/bccsp"
 )

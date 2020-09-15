@@ -4,18 +4,11 @@ Operations Guides
 .. toctree::
    :maxdepth: 1
 
-   upgrade_to_newest_version
+   upgrade_to_one_point_one
    config_update
    msp
-   hsm.md
    configtx
    endorsement-policies
-   pluggable_endorsement_and_validation
-   access_control.md
-   idemix
-   idemixgen
-   operations_service
-   metrics_reference
    error-handling
    logging-control
    enable_tls

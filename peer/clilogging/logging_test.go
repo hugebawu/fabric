@@ -1,7 +1,17 @@
 /*
-Copyright IBM Corp. All Rights Reserved.
+ Copyright Digital Asset Holdings, LLC 2016 All Rights Reserved.
 
-SPDX-License-Identifier: Apache-2.0
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
 */
 
 package clilogging
@@ -9,10 +19,7 @@ package clilogging
 import (
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/peer/common"
-	common2 "github.com/hyperledger/fabric/protos/common"
-	"github.com/hyperledger/fabric/protos/utils"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
@@ -27,15 +34,6 @@ func initLoggingTest(command string) (*cobra.Command, *LoggingCmdFactory) {
 	adminClient := common.GetMockAdminClient(nil)
 	mockCF := &LoggingCmdFactory{
 		AdminClient: adminClient,
-		wrapWithEnvelope: func(msg proto.Message) *common2.Envelope {
-			pl := &common2.Payload{
-				Data: utils.MarshalOrPanic(msg),
-			}
-			env := &common2.Envelope{
-				Payload: utils.MarshalOrPanic(pl),
-			}
-			return env
-		},
 	}
 	var cmd *cobra.Command
 	if command == "getlevel" {
@@ -44,10 +42,6 @@ func initLoggingTest(command string) (*cobra.Command, *LoggingCmdFactory) {
 		cmd = setLevelCmd(mockCF)
 	} else if command == "revertlevels" {
 		cmd = revertLevelsCmd(mockCF)
-	} else if command == "getlogspec" {
-		cmd = getLogSpecCmd(mockCF)
-	} else if command == "setlogspec" {
-		cmd = setLogSpecCmd(mockCF)
 	} else {
 		// should only happen when there's a typo in a test case below
 	}
@@ -101,24 +95,4 @@ func TestRevertLevels(t *testing.T) {
 		testCase{"ExtraParameter", []string{"peer"}, true},
 	)
 	runTests(t, "revertlevels", tc)
-}
-
-// TestGetLogSpec tests getlogspec with various parameters
-func TestGetLogSpec(t *testing.T) {
-	var tc []testCase
-	tc = append(tc,
-		testCase{"Valid", []string{}, false},
-		testCase{"ExtraParameter", []string{"peer"}, true},
-	)
-	runTests(t, "getlogspec", tc)
-}
-
-// TestSetLogSpec tests setlogspec with various parameters
-func TestSetLogSpec(t *testing.T) {
-	var tc []testCase
-	tc = append(tc,
-		testCase{"NoParameters", []string{}, true},
-		testCase{"Valid", []string{"debug"}, false},
-	)
-	runTests(t, "setlogspec", tc)
 }

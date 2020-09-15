@@ -1,5 +1,5 @@
 /*
-Copyright IBM Corp. All Rights Reserved.
+Copyright IBM Corp. 2016-2017 All Rights Reserved.
 
 SPDX-License-Identifier: Apache-2.0
 */
@@ -7,19 +7,19 @@ SPDX-License-Identifier: Apache-2.0
 package chaincode
 
 import (
-	"context"
 	"fmt"
 	"io/ioutil"
 
-	"github.com/pkg/errors"
-
 	"github.com/golang/protobuf/proto"
+	"golang.org/x/net/context"
+
 	"github.com/hyperledger/fabric/core/common/ccpackage"
 	"github.com/hyperledger/fabric/core/common/ccprovider"
 	"github.com/hyperledger/fabric/peer/common"
 	pcommon "github.com/hyperledger/fabric/protos/common"
 	pb "github.com/hyperledger/fabric/protos/peer"
 	"github.com/hyperledger/fabric/protos/utils"
+
 	"github.com/spf13/cobra"
 )
 
@@ -50,9 +50,6 @@ func installCmd(cf *ChaincodeCmdFactory) *cobra.Command {
 		"path",
 		"name",
 		"version",
-		"peerAddresses",
-		"tlsRootCertFiles",
-		"connectionProfile",
 	}
 	attachFlags(chaincodeInstallCmd, flagList)
 
@@ -77,19 +74,13 @@ func install(msg proto.Message, cf *ChaincodeCmdFactory) error {
 		return fmt.Errorf("Error creating signed proposal  %s: %s", chainFuncName, err)
 	}
 
-	// install is currently only supported for one peer
-	proposalResponse, err := cf.EndorserClients[0].ProcessProposal(context.Background(), signedProp)
+	proposalResponse, err := cf.EndorserClient.ProcessProposal(context.Background(), signedProp)
 	if err != nil {
 		return fmt.Errorf("Error endorsing %s: %s", chainFuncName, err)
 	}
 
 	if proposalResponse != nil {
-		if proposalResponse.Response.Status != int32(pcommon.Status_SUCCESS) {
-			return errors.Errorf("Bad response: %d - %s", proposalResponse.Response.Status, proposalResponse.Response.Message)
-		}
-		logger.Infof("Installed remotely %v", proposalResponse)
-	} else {
-		return errors.New("Error during install: received nil proposal response")
+		logger.Debugf("Installed remotely %v", proposalResponse)
 	}
 
 	return nil
@@ -108,7 +99,7 @@ func genChaincodeDeploymentSpec(cmd *cobra.Command, chaincodeName, chaincodeVers
 
 	cds, err := getChaincodeDeploymentSpec(spec, true)
 	if err != nil {
-		return nil, fmt.Errorf("error getting chaincode code %s: %s", chaincodeName, err)
+		return nil, fmt.Errorf("Error getting chaincode code %s: %s", chainFuncName, err)
 	}
 
 	return cds, nil
@@ -146,7 +137,7 @@ func getPackageFromFile(ccpackfile string) (proto.Message, *pb.ChaincodeDeployme
 		}
 
 		//...and get the CDS at last
-		cds, err = utils.GetChaincodeDeploymentSpec(sCDS.ChaincodeDeploymentSpec, platformRegistry)
+		cds, err = utils.GetChaincodeDeploymentSpec(sCDS.ChaincodeDeploymentSpec)
 		if err != nil {
 			return nil, nil, fmt.Errorf("error extracting chaincode deployment spec(%s)", err)
 		}
@@ -157,12 +148,9 @@ func getPackageFromFile(ccpackfile string) (proto.Message, *pb.ChaincodeDeployme
 
 // chaincodeInstall installs the chaincode. If remoteinstall, does it via a lscc call
 func chaincodeInstall(cmd *cobra.Command, ccpackfile string, cf *ChaincodeCmdFactory) error {
-	// Parsing of the command line is done so silence cmd usage
-	cmd.SilenceUsage = true
-
 	var err error
 	if cf == nil {
-		cf, err = InitCmdFactory(cmd.Name(), true, false)
+		cf, err = InitCmdFactory(true, false)
 		if err != nil {
 			return err
 		}

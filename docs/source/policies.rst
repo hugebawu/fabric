@@ -212,7 +212,7 @@ As another more complex example:
 
 This defines a signature policy over MSP Principals ``mspP1``,
 ``mspP2``, and ``mspP3``. It requires one signature which satisfies
-``mspP1``, and another signature which either satisfies ``mspP2`` or
+``mspP0``, and another signature which either satisfies ``mspP2`` or
 ``mspP3``.
 
 Hopefully it is clear that complicated and relatively arbitrary logic
@@ -315,12 +315,11 @@ message defined as follows:
 The ``msp_identifier`` is set to the ID of the MSP (as defined by the
 ``MSPConfig`` proto in the channel configuration for an org) which will
 evaluate the signature, and the ``Role`` is set to either ``MEMBER``,
-``ADMIN``, ``CLIENT`` or ``PEER``. In particular:
+``ADMIN``, ``CLIENT`` or ``PEER``. In particular
 
 1. ``MEMBER`` matches any certificate issued by the MSP.
 2. ``ADMIN`` matches certificates enumerated as admin in the MSP definition.
-3. ``CLIENT`` (``PEER``) matches certificates that carry the client (peer) Organizational unit.
-
+3. ``CLIENT`` (``PEER``) matches certificates that carry the client (peer) Organizational unit
 (see `MSP Documentation <http://hyperledger-fabric.readthedocs.io/en/latest/msp.html>`_)
 
 Constructing an ImplicitMetaPolicy
@@ -407,7 +406,7 @@ Note that policies higher in the hierarchy are all defined as
 ``SignaturePolicy``\ s. This set of defaults works nicely because the
 ``ImplicitMetaPolicies`` do not need to be redefined as the number of
 organizations change, and the individual organizations may pick their
-own rules and thresholds for what is means to be a Reader, Writer, and
+own rules and thresholds for what is means to be a a Reader, Writer, and
 Admin.
 
 .. Licensed under Creative Commons Attribution 4.0 International License

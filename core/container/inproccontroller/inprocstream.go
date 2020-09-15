@@ -17,7 +17,6 @@ limitations under the License.
 package inproccontroller
 
 import (
-	"errors"
 	"fmt"
 
 	pb "github.com/hyperledger/fabric/protos/peer"
@@ -54,9 +53,6 @@ func (s *inProcStream) Send(msg *pb.ChaincodeMessage) (err error) {
 }
 
 func (s *inProcStream) Recv() (*pb.ChaincodeMessage, error) {
-	msg, ok := <-s.recv
-	if !ok {
-		return nil, errors.New("channel is closed")
-	}
+	msg := <-s.recv
 	return msg, nil
 }

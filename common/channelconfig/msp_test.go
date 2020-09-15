@@ -9,16 +9,16 @@ package channelconfig
 import (
 	"testing"
 
-	"github.com/hyperledger/fabric/core/config/configtest"
+	"github.com/hyperledger/fabric/core/config"
 	"github.com/hyperledger/fabric/msp"
 	mspprotos "github.com/hyperledger/fabric/protos/msp"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestMSPConfigManager(t *testing.T) {
-	mspDir, err := configtest.GetDevMspDir()
+	mspDir, err := config.GetDevMspDir()
 	assert.NoError(t, err)
-	conf, err := msp.GetLocalMspConfig(mspDir, nil, "SampleOrg")
+	conf, err := msp.GetLocalMspConfig(mspDir, nil, "DEFAULT")
 	assert.NoError(t, err)
 
 	// test success:

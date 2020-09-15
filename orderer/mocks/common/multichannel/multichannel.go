@@ -25,10 +25,7 @@ type ConsenterSupport struct {
 	// BlockCutterVal is the value returned by BlockCutter()
 	BlockCutterVal *mockblockcutter.Receiver
 
-	// BlockByIndex maps block numbers to retrieved values of these blocks
-	BlockByIndex map[uint64]*cb.Block
-
-	// Blocks is the channel where WriteBlock writes the most recently created block,
+	// Blocks is the channel where WriteBlock writes the most recently created block
 	Blocks chan *cb.Block
 
 	// ChainIDVal is the value returned by ChainID()
@@ -63,14 +60,6 @@ type ConsenterSupport struct {
 
 	// SequenceVal is returned by Sequence
 	SequenceVal uint64
-
-	// BlockVerificationErr is returned by VerifyBlockSignature
-	BlockVerificationErr error
-}
-
-// Block returns the block with the given number or nil if not found
-func (mcs *ConsenterSupport) Block(number uint64) *cb.Block {
-	return mcs.BlockByIndex[number]
 }
 
 // BlockCutter returns BlockCutterVal
@@ -152,9 +141,4 @@ func (mcs *ConsenterSupport) ProcessConfigMsg(env *cb.Envelope) (*cb.Envelope, u
 // Sequence returns SequenceVal
 func (mcs *ConsenterSupport) Sequence() uint64 {
 	return mcs.SequenceVal
-}
-
-// VerifyBlockSignature verifies a signature of a block
-func (mcs *ConsenterSupport) VerifyBlockSignature(_ []*cb.SignedData, _ *cb.ConfigEnvelope) error {
-	return mcs.BlockVerificationErr
 }

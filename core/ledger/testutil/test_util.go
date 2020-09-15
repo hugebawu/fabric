@@ -1,7 +1,17 @@
 /*
-Copyright IBM Corp. All Rights Reserved.
+Copyright IBM Corp. 2016 All Rights Reserved.
 
-SPDX-License-Identifier: Apache-2.0
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+		 http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
 
 package testutil
@@ -14,7 +24,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hyperledger/fabric/core/config/configtest"
+	"github.com/hyperledger/fabric/core/config"
+	"github.com/op/go-logging"
 	"github.com/spf13/viper"
 )
 
@@ -51,6 +62,10 @@ func SetupTestConfig() {
 			panic(fmt.Errorf("Fatal error config file: %s \n", err))
 		}
 	}
+	var formatter = logging.MustStringFormatter(
+		`%{color}%{time:15:04:05.000} [%{module}] %{shortfunc} [%{shortfile}] -> %{level:.4s} %{id:03x}%{color:reset} %{message}`,
+	)
+	logging.SetFormatter(formatter)
 }
 
 // SetupCoreYAMLConfig sets up configurations for testing
@@ -60,7 +75,7 @@ func SetupCoreYAMLConfig() {
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()
 
-	err := configtest.AddDevConfigPath(nil)
+	err := config.AddDevConfigPath(nil)
 	if err != nil {
 		panic(fmt.Errorf("Fatal error adding dev dir: %s \n", err))
 	}
@@ -74,13 +89,17 @@ func SetupCoreYAMLConfig() {
 // ResetConfigToDefaultValues resets configurations optins back to defaults
 func ResetConfigToDefaultValues() {
 	//reset to defaults
-	viper.Set("ledger.state.totalQueryLimit", 10000)
-	viper.Set("ledger.state.couchDBConfig.internalQueryLimit", 1000)
+	viper.Set("ledger.state.couchDBConfig.queryLimit", 10000)
 	viper.Set("ledger.state.stateDatabase", "goleveldb")
 	viper.Set("ledger.history.enableHistoryDatabase", false)
 	viper.Set("ledger.state.couchDBConfig.autoWarmIndexes", true)
 	viper.Set("ledger.state.couchDBConfig.warmIndexesAfterNBlocks", 1)
 	viper.Set("peer.fileSystemPath", "/var/hyperledger/production")
+}
+
+// SetLogLevel sets up log level
+func SetLogLevel(level logging.Level, module string) {
+	logging.SetLevel(level, module)
 }
 
 // ParseTestParams parses tests params

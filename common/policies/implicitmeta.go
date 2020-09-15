@@ -10,9 +10,10 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/golang/protobuf/proto"
 	cb "github.com/hyperledger/fabric/protos/common"
-	"go.uber.org/zap/zapcore"
+
+	"github.com/golang/protobuf/proto"
+	"github.com/op/go-logging"
 )
 
 type implicitMetaPolicy struct {
@@ -71,7 +72,7 @@ func (imp *implicitMetaPolicy) Evaluate(signatureSet []*cb.SignedData) error {
 	defer func() {
 		if remaining != 0 {
 			// This log message may be large and expensive to construct, so worth checking the log level
-			if logger.IsEnabledFor(zapcore.DebugLevel) {
+			if logger.IsEnabledFor(logging.DEBUG) {
 				var b bytes.Buffer
 				b.WriteString(fmt.Sprintf("Evaluation Failed: Only %d policies were satisfied, but needed %d of [ ", imp.threshold-remaining, imp.threshold))
 				for m := range imp.managers {

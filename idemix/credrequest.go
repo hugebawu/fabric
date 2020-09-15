@@ -7,8 +7,8 @@ SPDX-License-Identifier: Apache-2.0
 package idemix
 
 import (
-	"github.com/hyperledger/fabric-amcl/amcl"
-	"github.com/hyperledger/fabric-amcl/amcl/FP256BN"
+	"github.com/milagro-crypto/amcl/version3/go/amcl"
+	"github.com/milagro-crypto/amcl/version3/go/amcl/FP256BN"
 	"github.com/pkg/errors"
 )
 
@@ -30,22 +30,17 @@ const credRequestLabel = "credRequest"
 // 4) The user verifies the issuer's signature and stores the credential that consists of
 //    the signature value, a randomness used to create the signature, the user secret, and the attribute values
 
-// NewCredRequest creates a new Credential Request, the first message of the interactive credential issuance protocol
-// (from user to issuer)
-func NewCredRequest(sk *FP256BN.BIG, IssuerNonce []byte, ipk *IssuerPublicKey, rng *amcl.RAND) *CredRequest {
-	// Set Nym as h_{sk}^{sk}
+// NewCredRequest creates a new Credential Request, the first message of the interactive credential issuance protocol (from user to issuer)
+func NewCredRequest(sk *FP256BN.BIG, credS1 *FP256BN.BIG, IssuerNonce *FP256BN.BIG, ipk *IssuerPublicKey, rng *amcl.RAND) *CredRequest {
 	HSk := EcpFromProto(ipk.HSk)
-	Nym := HSk.Mul(sk)
+	HRand := EcpFromProto(ipk.HRand)
+	Nym := HSk.Mul2(sk, HRand, credS1)
 
-	// generate a zero-knowledge proof of knowledge (ZK PoK) of the secret key
-
-	// Sample the randomness needed for the proof
+	// Create ZK Proof
 	rSk := RandModOrder(rng)
+	rRand := RandModOrder(rng)
+	t := HSk.Mul2(rSk, HRand, rRand)
 
-	// Step 1: First message (t-values)
-	t := HSk.Mul(rSk) // t = h_{sk}^{r_{sk}}, cover Nym
-
-	// Step 2: Compute the Fiat-Shamir hash, forming the challenge of the ZKP.
 	// proofData is the data being hashed, it consists of:
 	// the credential request label
 	// 3 elements of G1 each taking 2*FieldBytes+1 bytes
@@ -57,48 +52,46 @@ func NewCredRequest(sk *FP256BN.BIG, IssuerNonce []byte, ipk *IssuerPublicKey, r
 	index = appendBytesG1(proofData, index, t)
 	index = appendBytesG1(proofData, index, HSk)
 	index = appendBytesG1(proofData, index, Nym)
-	index = appendBytes(proofData, index, IssuerNonce)
+	index = appendBytesBig(proofData, index, IssuerNonce)
 	copy(proofData[index:], ipk.Hash)
+
 	proofC := HashModOrder(proofData)
+	proofS1 := Modadd(FP256BN.Modmul(proofC, sk, GroupOrder), rSk, GroupOrder)
+	proofS2 := Modadd(FP256BN.Modmul(proofC, credS1, GroupOrder), rRand, GroupOrder)
 
-	// Step 3: reply to the challenge message (s-values)
-	proofS := Modadd(FP256BN.Modmul(proofC, sk, GroupOrder), rSk, GroupOrder) // s = r_{sk} + C \cdot sk
-
-	// Done
-	return &CredRequest{
-		Nym:         EcpToProto(Nym),
-		IssuerNonce: IssuerNonce,
-		ProofC:      BigToBytes(proofC),
-		ProofS:      BigToBytes(proofS)}
+	return &CredRequest{EcpToProto(Nym), BigToBytes(IssuerNonce), BigToBytes(proofC), BigToBytes(proofS1), BigToBytes(proofS2)}
 }
 
 // Check cryptographically verifies the credential request
 func (m *CredRequest) Check(ipk *IssuerPublicKey) error {
 	Nym := EcpFromProto(m.GetNym())
-	IssuerNonce := m.GetIssuerNonce()
+	IssuerNonce := FP256BN.FromBytes(m.GetIssuerNonce())
 	ProofC := FP256BN.FromBytes(m.GetProofC())
-	ProofS := FP256BN.FromBytes(m.GetProofS())
+	ProofS1 := FP256BN.FromBytes(m.GetProofS1())
+	ProofS2 := FP256BN.FromBytes(m.GetProofS2())
 
 	HSk := EcpFromProto(ipk.HSk)
+	HRand := EcpFromProto(ipk.HRand)
 
-	if Nym == nil || IssuerNonce == nil || ProofC == nil || ProofS == nil {
+	if Nym == nil || IssuerNonce == nil || ProofC == nil || ProofS1 == nil || ProofS2 == nil {
 		return errors.Errorf("one of the proof values is undefined")
 	}
 
-	// Verify Proof
+	t := HSk.Mul2(ProofS1, HRand, ProofS2)
+	t.Sub(Nym.Mul(ProofC))
 
-	// Recompute t-values using s-values
-	t := HSk.Mul(ProofS)
-	t.Sub(Nym.Mul(ProofC)) // t = h_{sk}^s / Nym^C
-
-	// Recompute challenge
+	// proofData is the data being hashed, it consists of:
+	// the credential request label
+	// 3 elements of G1 each taking 2*FieldBytes+1 bytes
+	// hash of the issuer public key of length FieldBytes
+	// issuer nonce of length FieldBytes
 	proofData := make([]byte, len([]byte(credRequestLabel))+3*(2*FieldBytes+1)+2*FieldBytes)
 	index := 0
 	index = appendBytesString(proofData, index, credRequestLabel)
 	index = appendBytesG1(proofData, index, t)
 	index = appendBytesG1(proofData, index, HSk)
 	index = appendBytesG1(proofData, index, Nym)
-	index = appendBytes(proofData, index, IssuerNonce)
+	index = appendBytesBig(proofData, index, IssuerNonce)
 	copy(proofData[index:], ipk.Hash)
 
 	if *ProofC != *HashModOrder(proofData) {

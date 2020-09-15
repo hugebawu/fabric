@@ -81,9 +81,6 @@ func (h *DBHandle) Delete(key []byte, sync bool) error {
 
 // WriteBatch writes a batch in an atomic way
 func (h *DBHandle) WriteBatch(batch *UpdateBatch, sync bool) error {
-	if len(batch.KVs) == 0 {
-		return nil
-	}
 	levelBatch := &leveldb.Batch{}
 	for k, v := range batch.KVs {
 		key := constructLevelKey(h.dbName, []byte(k))
@@ -134,11 +131,6 @@ func (batch *UpdateBatch) Put(key []byte, value []byte) {
 // Delete deletes a Key and associated value
 func (batch *UpdateBatch) Delete(key []byte) {
 	batch.KVs[string(key)] = nil
-}
-
-// Len returns the number of entries in the batch
-func (batch *UpdateBatch) Len() int {
-	return len(batch.KVs)
 }
 
 // Iterator extends actual leveldb iterator

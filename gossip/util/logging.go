@@ -10,62 +10,46 @@ import (
 	"sync"
 
 	"github.com/hyperledger/fabric/common/flogging"
-	"go.uber.org/zap/zapcore"
+	"github.com/op/go-logging"
 )
 
-// Logger names for logger initialization.
+// Module names for logger initialization.
 const (
-	ChannelLogger     = "gossip.channel"
-	CommLogger        = "gossip.comm"
-	DiscoveryLogger   = "gossip.discovery"
-	ElectionLogger    = "gossip.election"
-	GossipLogger      = "gossip.gossip"
-	CommMockLogger    = "gossip.comm.mock"
-	PullLogger        = "gossip.pull"
-	ServiceLogger     = "gossip.service"
-	StateLogger       = "gossip.state"
-	PrivateDataLogger = "gossip.privdata"
+	LoggingChannelModule   = "gossip/channel"
+	LoggingCommModule      = "gossip/comm"
+	LoggingDiscoveryModule = "gossip/discovery"
+	LoggingElectionModule  = "gossip/election"
+	LoggingGossipModule    = "gossip/gossip"
+	LoggingMockModule      = "gossip/comm/mock"
+	LoggingPullModule      = "gossip/pull"
+	LoggingServiceModule   = "gossip/service"
+	LoggingStateModule     = "gossip/state"
+	LoggingPrivModule      = "gossip/privdata"
 )
 
-var loggers = make(map[string]Logger)
+var loggersByModules = make(map[string]*logging.Logger)
 var lock = sync.Mutex{}
 var testMode bool
 
 // defaultTestSpec is the default logging level for gossip tests
 var defaultTestSpec = "WARNING"
 
-type Logger interface {
-	Debug(args ...interface{})
-	Debugf(format string, args ...interface{})
-	Error(args ...interface{})
-	Errorf(format string, args ...interface{})
-	Fatal(args ...interface{})
-	Fatalf(format string, args ...interface{})
-	Info(args ...interface{})
-	Infof(format string, args ...interface{})
-	Panic(args ...interface{})
-	Panicf(format string, args ...interface{})
-	Warning(args ...interface{})
-	Warningf(format string, args ...interface{})
-	IsEnabledFor(l zapcore.Level) bool
-}
-
-// GetLogger returns a logger for given gossip logger name and peerID
-func GetLogger(name string, peerID string) Logger {
+// GetLogger returns a logger for given gossip module and peerID
+func GetLogger(module string, peerID string) *logging.Logger {
 	if peerID != "" && testMode {
-		name = name + "#" + peerID
+		module = module + "#" + peerID
 	}
 
 	lock.Lock()
 	defer lock.Unlock()
 
-	if lgr, ok := loggers[name]; ok {
+	if lgr, ok := loggersByModules[module]; ok {
 		return lgr
 	}
 
 	// Logger doesn't exist, create a new one
-	lgr := flogging.MustGetLogger(name)
-	loggers[name] = lgr
+	lgr := flogging.MustGetLogger(module)
+	loggersByModules[module] = lgr
 	return lgr
 }
 

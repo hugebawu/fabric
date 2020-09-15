@@ -15,6 +15,7 @@ import (
 	"github.com/hyperledger/fabric/gossip/discovery"
 	"github.com/hyperledger/fabric/gossip/util"
 	proto "github.com/hyperledger/fabric/protos/gossip"
+	"github.com/op/go-logging"
 )
 
 type msgImpl struct {
@@ -42,8 +43,8 @@ func (pi *peerImpl) ID() peerID {
 }
 
 type gossip interface {
-	// PeersOfChannel returns the NetworkMembers considered alive in a channel
-	PeersOfChannel(channel common.ChainID) []discovery.NetworkMember
+	// Peers returns the NetworkMembers considered alive
+	Peers() []discovery.NetworkMember
 
 	// Accept returns a dedicated read-only channel for messages sent by other nodes that match a certain predicate.
 	// If passThrough is false, the messages are processed by the gossip layer beforehand.
@@ -53,9 +54,6 @@ type gossip interface {
 
 	// Gossip sends a message to other peers to the network
 	Gossip(msg *proto.GossipMessage)
-
-	// IsInMyOrg checks whether a network member is in this peer's org
-	IsInMyOrg(member discovery.NetworkMember) bool
 }
 
 type adapterImpl struct {
@@ -67,7 +65,7 @@ type adapterImpl struct {
 
 	channel common.ChainID
 
-	logger util.Logger
+	logger *logging.Logger
 
 	doneCh   chan struct{}
 	stopOnce *sync.Once
@@ -84,7 +82,7 @@ func NewAdapter(gossip gossip, pkiid common.PKIidType, channel common.ChainID) L
 
 		channel: channel,
 
-		logger: util.GetLogger(util.ElectionLogger, ""),
+		logger: util.GetLogger(util.LoggingElectionModule, ""),
 
 		doneCh:   make(chan struct{}),
 		stopOnce: &sync.Once{},
@@ -145,13 +143,11 @@ func (ai *adapterImpl) CreateMessage(isDeclaration bool) Msg {
 }
 
 func (ai *adapterImpl) Peers() []Peer {
-	peers := ai.gossip.PeersOfChannel(ai.channel)
+	peers := ai.gossip.Peers()
 
 	var res []Peer
 	for _, peer := range peers {
-		if ai.gossip.IsInMyOrg(peer) {
-			res = append(res, &peerImpl{peer})
-		}
+		res = append(res, &peerImpl{peer})
 	}
 
 	return res

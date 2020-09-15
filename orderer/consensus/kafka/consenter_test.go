@@ -12,18 +12,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Shopify/sarama"
+	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/common/flogging"
 	mockconfig "github.com/hyperledger/fabric/common/mocks/config"
 	localconfig "github.com/hyperledger/fabric/orderer/common/localconfig"
 	"github.com/hyperledger/fabric/orderer/consensus"
-	"github.com/hyperledger/fabric/orderer/consensus/kafka/mock"
 	mockmultichannel "github.com/hyperledger/fabric/orderer/mocks/common/multichannel"
 	cb "github.com/hyperledger/fabric/protos/common"
 	ab "github.com/hyperledger/fabric/protos/orderer"
 	"github.com/hyperledger/fabric/protos/utils"
-
-	"github.com/Shopify/sarama"
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -51,32 +49,18 @@ var mockRetryOptions = localconfig.Retry{
 }
 
 func init() {
-	mockLocalConfig = newMockLocalConfig(
-		false,
-		localconfig.SASLPlain{Enabled: false},
-		mockRetryOptions,
-		false)
-	mockBrokerConfig = newMockBrokerConfig(
-		mockLocalConfig.General.TLS,
-		mockLocalConfig.Kafka.SASLPlain,
-		mockLocalConfig.Kafka.Retry,
-		mockLocalConfig.Kafka.Version,
-		defaultPartition)
-	mockConsenter = newMockConsenter(
-		mockBrokerConfig,
-		mockLocalConfig.General.TLS,
-		mockLocalConfig.Kafka.Retry,
-		mockLocalConfig.Kafka.Version)
+	mockLocalConfig = newMockLocalConfig(false, mockRetryOptions, false)
+	mockBrokerConfig = newMockBrokerConfig(mockLocalConfig.General.TLS, mockLocalConfig.Kafka.Retry, mockLocalConfig.Kafka.Version, defaultPartition)
+	mockConsenter = newMockConsenter(mockBrokerConfig, mockLocalConfig.General.TLS, mockLocalConfig.Kafka.Retry, mockLocalConfig.Kafka.Version)
 	setupTestLogging("ERROR")
 }
 
 func TestNew(t *testing.T) {
-	c, _ := New(mockLocalConfig.Kafka, &mock.MetricsProvider{})
-	_ = consensus.Consenter(c)
+	_ = consensus.Consenter(New(mockLocalConfig.Kafka))
 }
 
 func TestHandleChain(t *testing.T) {
-	consenter, _ := New(mockLocalConfig.Kafka, &mock.MetricsProvider{})
+	consenter := consensus.Consenter(New(mockLocalConfig.Kafka))
 
 	oldestOffset := int64(0)
 	newestOffset := int64(5)
@@ -106,6 +90,7 @@ func TestHandleChain(t *testing.T) {
 	}
 
 	mockMetadata := &cb.Metadata{Value: utils.MarshalOrPanic(&ab.KafkaMetadata{LastOffsetPersisted: newestOffset - 1})}
+
 	_, err := consenter.HandleChain(mockSupport, mockMetadata)
 	assert.NoError(t, err, "Expected the HandleChain call to return without errors")
 }
@@ -124,19 +109,8 @@ func extractEncodedOffset(marshalledOrdererMetadata []byte) int64 {
 	return kmd.LastOffsetPersisted
 }
 
-func newMockBrokerConfig(
-	tlsConfig localconfig.TLS,
-	saslPlain localconfig.SASLPlain,
-	retryOptions localconfig.Retry,
-	kafkaVersion sarama.KafkaVersion,
-	chosenStaticPartition int32) *sarama.Config {
-
-	brokerConfig := newBrokerConfig(
-		tlsConfig,
-		saslPlain,
-		retryOptions,
-		kafkaVersion,
-		chosenStaticPartition)
+func newMockBrokerConfig(tlsConfig localconfig.TLS, retryOptions localconfig.Retry, kafkaVersion sarama.KafkaVersion, chosenStaticPartition int32) *sarama.Config {
+	brokerConfig := newBrokerConfig(tlsConfig, retryOptions, kafkaVersion, chosenStaticPartition)
 	brokerConfig.ClientID = "test"
 	return brokerConfig
 }
@@ -163,12 +137,7 @@ func newMockEnvelope(content string) *cb.Envelope {
 	})}
 }
 
-func newMockLocalConfig(
-	enableTLS bool,
-	saslPlain localconfig.SASLPlain,
-	retryOptions localconfig.Retry,
-	verboseLog bool) *localconfig.TopLevel {
-
+func newMockLocalConfig(enableTLS bool, retryOptions localconfig.Retry, verboseLog bool) *localconfig.TopLevel {
 	return &localconfig.TopLevel{
 		General: localconfig.General{
 			TLS: localconfig.TLS{
@@ -179,10 +148,9 @@ func newMockLocalConfig(
 			TLS: localconfig.TLS{
 				Enabled: enableTLS,
 			},
-			SASLPlain: saslPlain,
-			Retry:     retryOptions,
-			Verbose:   verboseLog,
-			Version:   sarama.V0_9_0_1, // sarama.MockBroker only produces messages compatible with version < 0.10
+			Retry:   retryOptions,
+			Verbose: verboseLog,
+			Version: sarama.V0_9_0_1, // sarama.MockBroker only produces messages compatible with version < 0.10
 		},
 	}
 }
@@ -191,8 +159,8 @@ func setupTestLogging(logLevel string) {
 	// This call allows us to (a) get the logging backend initialization that
 	// takes place in the `flogging` package, and (b) adjust the verbosity of
 	// the logs when running tests on this package.
-	spec := fmt.Sprintf("orderer.consensus.kafka=%s", logLevel)
-	flogging.ActivateSpec(spec)
+	flogging.SetModuleLevel(pkgLogID, logLevel)
+	flogging.SetModuleLevel(saramaLogID, logLevel)
 }
 
 func tamperBytes(original []byte) []byte {
@@ -201,5 +169,6 @@ func tamperBytes(original []byte) []byte {
 }
 
 func channelNameForTest(t *testing.T) string {
-	return fmt.Sprintf("%s.channel", strings.Replace(strings.ToLower(t.Name()), "/", ".", -1))
+	name := strings.Split(fmt.Sprint(t), " ")[18] // w/golang 1.8, use t.Name()
+	return fmt.Sprintf("%s.channel", strings.Replace(strings.ToLower(name), "/", ".", -1))
 }

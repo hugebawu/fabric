@@ -22,19 +22,17 @@ import (
 )
 
 // Package version
-const Version = "1.4.0"
-
-var CommitSHA string
+var Version string
 
 // Program name
 const ProgramName = "configtxgen"
 
 func GetVersionInfo() string {
-	if CommitSHA == "" {
-		CommitSHA = "development build"
+	if Version == "" {
+		Version = "development build"
 	}
 
-	return fmt.Sprintf("%s:\n Version: %s\n Commit SHA: %s\n Go version: %s\n OS/Arch: %s",
-		ProgramName, Version, CommitSHA, runtime.Version(),
+	return fmt.Sprintf("%s:\n Version: %s\n Go version: %s\n OS/Arch: %s",
+		ProgramName, Version, runtime.Version(),
 		fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH))
 }

@@ -13,55 +13,47 @@ import (
 	"github.com/pkg/errors"
 )
 
-// ExpiresAtFunc is used to extract the time at which an identity expires.
-type ExpiresAtFunc func(identityBytes []byte) time.Time
+type expiresAtFunc func(identityBytes []byte) time.Time
 
-// ConfigSequencer provides the sequence number of the current config block.
-type ConfigSequencer interface {
+// acSupport provides the backing resources needed to support access control validation
+type acSupport interface {
+	// Sequence returns the current config sequence number, can be used to detect config changes
 	Sequence() uint64
 }
 
-// NewSessionAC creates an instance of SessionAccessControl. This constructor will
-// return an error if a signature header cannot be extracted from the envelope.
-func NewSessionAC(chain ConfigSequencer, env *common.Envelope, policyChecker PolicyChecker, channelID string, expiresAt ExpiresAtFunc) (*SessionAccessControl, error) {
+func newSessionAC(sup acSupport, env *common.Envelope, poliyChecker PolicyChecker, channel string, expiresAt expiresAtFunc) (*sessionAC, error) {
 	signedData, err := env.AsSignedData()
 	if err != nil {
 		return nil, err
 	}
 
-	return &SessionAccessControl{
-		envelope:       env,
-		channelID:      channelID,
-		sequencer:      chain,
-		policyChecker:  policyChecker,
+	return &sessionAC{
+		env:            env,
+		channel:        channel,
+		acSupport:      sup,
+		checkPolicy:    poliyChecker,
 		sessionEndTime: expiresAt(signedData[0].Identity),
 	}, nil
 }
 
-// SessionAccessControl holds access control related data for a common Envelope
-// that is used to determine if a request is allowed for the identity
-// associated with the request envelope.
-type SessionAccessControl struct {
-	sequencer          ConfigSequencer
-	policyChecker      PolicyChecker
-	channelID          string
-	envelope           *common.Envelope
+type sessionAC struct {
+	acSupport
+	checkPolicy        PolicyChecker
+	channel            string
+	env                *common.Envelope
 	lastConfigSequence uint64
 	sessionEndTime     time.Time
 	usedAtLeastOnce    bool
 }
 
-// Evaluate uses the PolicyChecker to determine if a request should be allowed.
-// The decision is cached until the identity expires or the chain configuration
-// changes.
-func (ac *SessionAccessControl) Evaluate() error {
+func (ac *sessionAC) evaluate() error {
 	if !ac.sessionEndTime.IsZero() && time.Now().After(ac.sessionEndTime) {
 		return errors.Errorf("client identity expired %v before", time.Since(ac.sessionEndTime))
 	}
 
 	policyCheckNeeded := !ac.usedAtLeastOnce
 
-	if currentConfigSequence := ac.sequencer.Sequence(); currentConfigSequence > ac.lastConfigSequence {
+	if currentConfigSequence := ac.Sequence(); currentConfigSequence > ac.lastConfigSequence {
 		ac.lastConfigSequence = currentConfigSequence
 		policyCheckNeeded = true
 	}
@@ -71,5 +63,6 @@ func (ac *SessionAccessControl) Evaluate() error {
 	}
 
 	ac.usedAtLeastOnce = true
-	return ac.policyChecker.CheckPolicy(ac.envelope, ac.channelID)
+	return ac.checkPolicy(ac.env, ac.channel)
+
 }

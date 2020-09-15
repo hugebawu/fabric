@@ -24,7 +24,7 @@ import (
 	"github.com/hyperledger/fabric/gossip/util"
 	"github.com/hyperledger/fabric/protos/common"
 	gproto "github.com/hyperledger/fabric/protos/gossip"
-	"github.com/hyperledger/fabric/protos/transientstore"
+	"github.com/hyperledger/fabric/protos/ledger/rwset"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
@@ -43,7 +43,7 @@ type GossipService interface {
 
 	// DistributePrivateData distributes private data to the peers in the collections
 	// according to policies induced by the PolicyStore and PolicyParser
-	DistributePrivateData(chainID string, txID string, privateData *transientstore.TxPvtReadWriteSetWithConfigInfo, blkHt uint64) error
+	DistributePrivateData(chainID string, txID string, privateData *rwset.TxPvtReadWriteSet) error
 	// NewConfigEventer creates a ConfigProcessor which the channelconfig.BundleSource can ultimately route config updates to
 	NewConfigEventer() ConfigProcessor
 	// InitializeChannel allocates the state provider and should be invoked once per channel per execution
@@ -76,12 +76,10 @@ type privateHandler struct {
 	support     Support
 	coordinator privdata2.Coordinator
 	distributor privdata2.PvtDataDistributor
-	reconciler  privdata2.PvtDataReconciler
 }
 
 func (p privateHandler) close() {
 	p.coordinator.Close()
-	p.reconciler.Stop()
 }
 
 type gossipServiceImpl struct {
@@ -123,7 +121,7 @@ func (jcm *joinChannelMessage) AnchorPeersOf(org api.OrgIdentityType) []api.Anch
 	return jcm.members2AnchorPeers[string(org)]
 }
 
-var logger = util.GetLogger(util.ServiceLogger, "")
+var logger = util.GetLogger(util.LoggingServiceModule, "")
 
 // InitGossipService initialize gossip service
 func InitGossipService(peerIdentity []byte, endpoint string, s *grpc.Server, certs *gossipCommon.TLSCertificates,
@@ -131,7 +129,7 @@ func InitGossipService(peerIdentity []byte, endpoint string, s *grpc.Server, cer
 	// TODO: Remove this.
 	// TODO: This is a temporary work-around to make the gossip leader election module load its logger at startup
 	// TODO: in order for the flogging package to register this logger in time so it can set the log levels as requested in the config
-	util.GetLogger(util.ElectionLogger, "")
+	util.GetLogger(util.LoggingElectionModule, "")
 	return InitGossipServiceCustomDeliveryFactory(peerIdentity, endpoint, s, certs, &deliveryFactoryImpl{},
 		mcs, secAdv, secureDialOpts, bootPeers...)
 }
@@ -173,7 +171,7 @@ func GetGossipService() GossipService {
 }
 
 // DistributePrivateData distribute private read write set inside the channel based on the collections policies
-func (g *gossipServiceImpl) DistributePrivateData(chainID string, txID string, privData *transientstore.TxPvtReadWriteSetWithConfigInfo, blkHt uint64) error {
+func (g *gossipServiceImpl) DistributePrivateData(chainID string, txID string, privData *rwset.TxPvtReadWriteSet) error {
 	g.lock.RLock()
 	handler, exists := g.privateHandlers[chainID]
 	g.lock.RUnlock()
@@ -181,12 +179,12 @@ func (g *gossipServiceImpl) DistributePrivateData(chainID string, txID string, p
 		return errors.Errorf("No private data handler for %s", chainID)
 	}
 
-	if err := handler.distributor.Distribute(txID, privData, blkHt); err != nil {
+	if err := handler.distributor.Distribute(txID, privData, handler.support.Cs); err != nil {
 		logger.Error("Failed to distributed private collection, txID", txID, "channel", chainID, "due to", err)
 		return err
 	}
 
-	if err := handler.coordinator.StorePvtData(txID, privData, blkHt); err != nil {
+	if err := handler.coordinator.StorePvtData(txID, privData); err != nil {
 		logger.Error("Failed to store private data into transient store, txID",
 			txID, "channel", chainID, "due to", err)
 		return err
@@ -202,11 +200,10 @@ func (g *gossipServiceImpl) NewConfigEventer() ConfigProcessor {
 // Support aggregates functionality of several
 // interfaces required by gossip service
 type Support struct {
-	Validator            txvalidator.Validator
-	Committer            committer.Committer
-	Store                privdata2.TransientStore
-	Cs                   privdata.CollectionStore
-	IdDeserializeFactory privdata2.IdentityDeserializerFactory
+	Validator txvalidator.Validator
+	Committer committer.Committer
+	Store     privdata2.TransientStore
+	Cs        privdata.CollectionStore
 }
 
 // DataStoreSupport aggregates interfaces capable
@@ -233,11 +230,9 @@ func (g *gossipServiceImpl) InitializeChannel(chainID string, endpoints []string
 	}
 	// Initialize private data fetcher
 	dataRetriever := privdata2.NewDataRetriever(storeSupport)
-	collectionAccessFactory := privdata2.NewCollectionAccessFactory(support.IdDeserializeFactory)
-	fetcher := privdata2.NewPuller(support.Cs, g.gossipSvc, dataRetriever, collectionAccessFactory, chainID)
+	fetcher := privdata2.NewPuller(support.Cs, g.gossipSvc, dataRetriever, chainID)
 
 	coordinator := privdata2.NewCoordinator(privdata2.Support{
-		ChainID:         chainID,
 		CollectionStore: support.Cs,
 		Validator:       support.Validator,
 		TransientStore:  support.Store,
@@ -245,23 +240,11 @@ func (g *gossipServiceImpl) InitializeChannel(chainID string, endpoints []string
 		Fetcher:         fetcher,
 	}, g.createSelfSignedData())
 
-	reconcilerConfig := privdata2.GetReconcilerConfig()
-	var reconciler privdata2.PvtDataReconciler
-
-	if reconcilerConfig.IsEnabled {
-		reconciler = privdata2.NewReconciler(support.Committer, fetcher, reconcilerConfig)
-	} else {
-		reconciler = &privdata2.NoOpReconciler{}
-	}
-
 	g.privateHandlers[chainID] = privateHandler{
 		support:     support,
 		coordinator: coordinator,
-		distributor: privdata2.NewDistributor(chainID, g, collectionAccessFactory),
-		reconciler:  reconciler,
+		distributor: privdata2.NewDistributor(chainID, g),
 	}
-	g.privateHandlers[chainID].reconciler.Start()
-
 	g.chains[chainID] = state.NewGossipStateProvider(chainID, servicesAdapter, coordinator)
 	if g.deliveryService[chainID] == nil {
 		var err error

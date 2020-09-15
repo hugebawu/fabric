@@ -8,13 +8,13 @@ package comm
 
 import (
 	"bytes"
-	"context"
-	"crypto/sha256"
 	"crypto/x509"
 	"encoding/pem"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/hyperledger/fabric/common/util"
 	"github.com/pkg/errors"
+	"golang.org/x/net/context"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
 )
@@ -112,21 +112,8 @@ func noopBinding(_ context.Context, _ []byte) error {
 	return nil
 }
 
-// ExtractCertificateHashFromContext extracts the hash of the certificate from the given context.
-// If the certificate isn't present, nil is returned
+// ExtractCertificateHashFromContext extracts the hash of the certificate from the given context
 func ExtractCertificateHashFromContext(ctx context.Context) []byte {
-	rawCert := ExtractCertificateFromContext(ctx)
-	if len(rawCert) == 0 {
-		return nil
-	}
-	h := sha256.New()
-	h.Write(rawCert)
-	return h.Sum(nil)
-}
-
-// ExtractCertificateFromContext returns the TLS certificate (if applicable)
-// from the given context of a gRPC stream
-func ExtractCertificateFromContext(ctx context.Context) []byte {
 	pr, extracted := peer.FromContext(ctx)
 	if !extracted {
 		return nil
@@ -145,5 +132,9 @@ func ExtractCertificateFromContext(ctx context.Context) []byte {
 	if len(certs) == 0 {
 		return nil
 	}
-	return certs[0].Raw
+	raw := certs[0].Raw
+	if len(raw) == 0 {
+		return nil
+	}
+	return util.ComputeSHA256(raw)
 }

@@ -23,15 +23,13 @@ import (
 
 	"github.com/hyperledger/fabric/common/ledger/blkstorage"
 	"github.com/hyperledger/fabric/common/ledger/blkstorage/fsblkstorage"
-	"github.com/hyperledger/fabric/core/ledger/kvledger/bookkeeping"
+	"github.com/hyperledger/fabric/common/ledger/testutil"
 	"github.com/hyperledger/fabric/core/ledger/kvledger/history/historydb"
 	"github.com/hyperledger/fabric/core/ledger/kvledger/txmgmt/privacyenabledstate"
 	"github.com/hyperledger/fabric/core/ledger/kvledger/txmgmt/txmgr"
 	"github.com/hyperledger/fabric/core/ledger/kvledger/txmgmt/txmgr/lockbasedtxmgr"
 	"github.com/hyperledger/fabric/core/ledger/ledgerconfig"
-	"github.com/hyperledger/fabric/core/ledger/mock"
 	"github.com/spf13/viper"
-	"github.com/stretchr/testify/assert"
 )
 
 /////// levelDBLockBasedHistoryEnv //////
@@ -40,10 +38,8 @@ type levelDBLockBasedHistoryEnv struct {
 	t                   testing.TB
 	testBlockStorageEnv *testBlockStoreEnv
 
-	testDBEnv          privacyenabledstate.TestEnv
-	testBookkeepingEnv *bookkeeping.TestEnv
-
-	txmgr txmgr.TxMgr
+	testDBEnv privacyenabledstate.TestEnv
+	txmgr     txmgr.TxMgr
 
 	testHistoryDBProvider historydb.HistoryDBProvider
 	testHistoryDB         historydb.HistoryDB
@@ -58,24 +54,22 @@ func newTestHistoryEnv(t *testing.T) *levelDBLockBasedHistoryEnv {
 	testDBEnv := &privacyenabledstate.LevelDBCommonStorageTestEnv{}
 	testDBEnv.Init(t)
 	testDB := testDBEnv.GetDBHandle(testLedgerID)
-	testBookkeepingEnv := bookkeeping.NewTestEnv(t)
 
-	txMgr, err := lockbasedtxmgr.NewLockBasedTxMgr(testLedgerID, testDB, nil, nil, testBookkeepingEnv.TestProvider, &mock.DeployedChaincodeInfoProvider{})
-	assert.NoError(t, err)
+	txMgr := lockbasedtxmgr.NewLockBasedTxMgr(testLedgerID, testDB, nil)
 	testHistoryDBProvider := NewHistoryDBProvider()
 	testHistoryDB, err := testHistoryDBProvider.GetDBHandle("TestHistoryDB")
-	assert.NoError(t, err)
+	testutil.AssertNoError(t, err, "")
 
 	return &levelDBLockBasedHistoryEnv{t,
-		blockStorageTestEnv, testDBEnv, testBookkeepingEnv,
+		blockStorageTestEnv, testDBEnv,
 		txMgr, testHistoryDBProvider, testHistoryDB}
 }
 
 func (env *levelDBLockBasedHistoryEnv) cleanup() {
-	env.txmgr.Shutdown()
-	env.testDBEnv.Cleanup()
-	env.testBlockStorageEnv.cleanup()
-	env.testBookkeepingEnv.Cleanup()
+	defer env.txmgr.Shutdown()
+	defer env.testDBEnv.Cleanup()
+	defer env.testBlockStorageEnv.cleanup()
+
 	// clean up history
 	env.testHistoryDBProvider.Close()
 	removeDBPath(env.t)

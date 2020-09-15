@@ -19,10 +19,11 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/rand"
-	"io"
 	"math/big"
 	mrand "math/rand"
 	"testing"
+
+	"io"
 
 	"github.com/hyperledger/fabric/bccsp"
 	"github.com/hyperledger/fabric/bccsp/mocks"

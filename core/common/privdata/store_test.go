@@ -15,8 +15,6 @@ import (
 	"github.com/hyperledger/fabric/core/ledger"
 	"github.com/hyperledger/fabric/msp"
 	"github.com/hyperledger/fabric/protos/common"
-	"github.com/hyperledger/fabric/protos/peer"
-	"github.com/hyperledger/fabric/protos/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/syndtr/goleveldb/leveldb/errors"
 )
@@ -30,13 +28,17 @@ func (c *mockStoreSupport) GetQueryExecutorForLedger(cid string) (ledger.QueryEx
 	return c.Qe, c.QErr
 }
 
+func (c *mockStoreSupport) GetCollectionKVSKey(cc common.CollectionCriteria) string {
+	return cc.Channel + cc.Namespace
+}
+
 func (c *mockStoreSupport) GetIdentityDeserializer(chainID string) msp.IdentityDeserializer {
 	return &mockDeserializer{}
 }
 
 func TestCollectionStore(t *testing.T) {
 	wState := make(map[string]map[string][]byte)
-	support := &mockStoreSupport{Qe: &lm.MockQueryExecutor{State: wState}}
+	support := &mockStoreSupport{Qe: &lm.MockQueryExecutor{wState}}
 	cs := NewSimpleCollectionStore(support)
 	assert.NotNil(t, cs)
 
@@ -52,20 +54,18 @@ func TestCollectionStore(t *testing.T) {
 
 	ccr := common.CollectionCriteria{Channel: "ch", Namespace: "cc", Collection: "mycollection"}
 
-	wState["lscc"][BuildCollectionKVSKey(ccr.Namespace)] = []byte("barf")
+	wState["lscc"][support.GetCollectionKVSKey(ccr)] = []byte("barf")
 
 	_, err = cs.RetrieveCollection(ccr)
 	assert.Error(t, err)
 
-	cc := &common.CollectionConfig{Payload: &common.CollectionConfig_StaticCollectionConfig{
-		StaticCollectionConfig: &common.StaticCollectionConfig{Name: "mycollection"}},
-	}
-	ccp := &common.CollectionConfigPackage{Config: []*common.CollectionConfig{cc}}
+	cc := &common.CollectionConfig{Payload: &common.CollectionConfig_StaticCollectionConfig{&common.StaticCollectionConfig{Name: "mycollection"}}}
+	ccp := &common.CollectionConfigPackage{[]*common.CollectionConfig{cc}}
 	ccpBytes, err := proto.Marshal(ccp)
 	assert.NoError(t, err)
 	assert.NotNil(t, ccpBytes)
 
-	wState["lscc"][BuildCollectionKVSKey(ccr.Namespace)] = ccpBytes
+	wState["lscc"][support.GetCollectionKVSKey(ccr)] = ccpBytes
 
 	_, err = cs.RetrieveCollection(ccr)
 	assert.Error(t, err)
@@ -74,19 +74,13 @@ func TestCollectionStore(t *testing.T) {
 	policyEnvelope := cauthdsl.Envelope(cauthdsl.Or(cauthdsl.SignedBy(0), cauthdsl.SignedBy(1)), signers)
 	accessPolicy := createCollectionPolicyConfig(policyEnvelope)
 
-	cc = &common.CollectionConfig{Payload: &common.CollectionConfig_StaticCollectionConfig{
-		StaticCollectionConfig: &common.StaticCollectionConfig{
-			Name:             "mycollection",
-			MemberOrgsPolicy: accessPolicy,
-			MemberOnlyRead:   false,
-		},
-	}}
-	ccp = &common.CollectionConfigPackage{Config: []*common.CollectionConfig{cc}}
+	cc = &common.CollectionConfig{Payload: &common.CollectionConfig_StaticCollectionConfig{&common.StaticCollectionConfig{Name: "mycollection", MemberOrgsPolicy: accessPolicy}}}
+	ccp = &common.CollectionConfigPackage{[]*common.CollectionConfig{cc}}
 	ccpBytes, err = proto.Marshal(ccp)
 	assert.NoError(t, err)
 	assert.NotNil(t, ccpBytes)
 
-	wState["lscc"][BuildCollectionKVSKey(ccr.Namespace)] = ccpBytes
+	wState["lscc"][support.GetCollectionKVSKey(ccr)] = ccpBytes
 
 	c, err := cs.RetrieveCollection(ccr)
 	assert.NoError(t, err)
@@ -103,29 +97,4 @@ func TestCollectionStore(t *testing.T) {
 	ccc, err := cs.RetrieveCollectionConfigPackage(ccr)
 	assert.NoError(t, err)
 	assert.NotNil(t, ccc)
-
-	cc = &common.CollectionConfig{Payload: &common.CollectionConfig_StaticCollectionConfig{
-		StaticCollectionConfig: &common.StaticCollectionConfig{
-			Name:             "mycollection",
-			MemberOrgsPolicy: accessPolicy,
-			MemberOnlyRead:   true,
-		},
-	}}
-	ccp = &common.CollectionConfigPackage{Config: []*common.CollectionConfig{cc}}
-	ccpBytes, err = proto.Marshal(ccp)
-	assert.NoError(t, err)
-	assert.NotNil(t, ccpBytes)
-
-	wState["lscc"][BuildCollectionKVSKey(ccr.Namespace)] = ccpBytes
-
-	signedProp, _ := utils.MockSignedEndorserProposalOrPanic("A", &peer.ChaincodeSpec{}, []byte("signer0"), []byte("msg1"))
-	allowedAccess, err := cs.HasReadAccess(ccr, signedProp, &lm.MockQueryExecutor{State: wState})
-	assert.NoError(t, err)
-	assert.True(t, allowedAccess)
-
-	// only signer0 and signer1 are the members
-	signedProp, _ = utils.MockSignedEndorserProposalOrPanic("A", &peer.ChaincodeSpec{}, []byte("signer2"), []byte("msg1"))
-	allowedAccess, err = cs.HasReadAccess(ccr, signedProp, &lm.MockQueryExecutor{State: wState})
-	assert.NoError(t, err)
-	assert.False(t, allowedAccess)
 }

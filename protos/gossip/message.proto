@@ -8,7 +8,6 @@ option go_package = "github.com/hyperledger/fabric/protos/gossip" ;
 
 package gossip;
 
-import "common/collection.proto";
 
 // Gossip
 service Gossip {
@@ -136,6 +135,7 @@ message GossipMessage {
 // StateInfo is used for a peer to relay its state information
 // to other peers
 message StateInfo {
+    bytes metadata     = 1;
     PeerTime timestamp = 2;
     bytes pki_id       = 3;
 
@@ -150,7 +150,6 @@ message StateInfo {
 message Properties {
     uint64 ledger_height = 1;
     bool left_channel = 2;
-    repeated Chaincode chaincodes = 3;
 }
 
 // StateInfoSnapshot is an aggregation of StateInfo messages
@@ -197,7 +196,7 @@ enum PullMsgType {
 // certain data blocks from a remote peer
 message DataRequest {
     uint64 nonce             = 1;
-    repeated bytes digests  = 2;
+    repeated string digests  = 2;
     PullMsgType msg_type     = 3;
 }
 
@@ -221,7 +220,7 @@ message DataUpdate {
 // to the initator peer and contains the data items it has
 message DataDigest {
     uint64 nonce             = 1;
-    repeated bytes digests  = 2; // Maybe change this to bitmap later on
+    repeated string digests  = 2; // Maybe change this to bitmap later on
     PullMsgType msg_type     = 3;
 }
 
@@ -255,8 +254,6 @@ message PrivatePayload {
     string namespace            = 2;
     string tx_id                = 3;
     bytes private_rwset         = 4;
-    uint64 private_sim_height  = 5;
-    common.CollectionConfigPackage collection_configs = 6;
 }
 
 // Membership messages
@@ -361,12 +358,4 @@ message PvtDataPayload {
 
 message Acknowledgement {
     string error = 1;
-}
-
-// Chaincode represents a Chaincode that is installed
-// on a peer
-message Chaincode {
-    string name = 1;
-    string version = 2;
-    bytes metadata = 3;
 }

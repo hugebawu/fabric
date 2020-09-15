@@ -60,11 +60,7 @@ docker run --rm busybox echo All good
 # ----------------------------------------------------------------
 # Install Golang
 # ----------------------------------------------------------------
-<<<<<<< HEAD
-GO_VER=1.13.9
-=======
-GO_VER=1.11.1
->>>>>>> tag-v1.4.0
+GO_VER=1.9
 GO_URL=https://storage.googleapis.com/golang/go${GO_VER}.linux-amd64.tar.gz
 
 # Set Go environment variables needed by other scripts
@@ -88,13 +84,18 @@ curl -sL $GO_URL | (cd $GOROOT && tar --strip-components 1 -xz)
 runuser -l ubuntu -c '/hyperledger/fabric/devenv/install_nvm.sh'
 
 # ----------------------------------------------------------------
+# Install Behave
+# ----------------------------------------------------------------
+/hyperledger/fabric/scripts/install_behave.sh
+
+# ----------------------------------------------------------------
 # Install Java
 # ----------------------------------------------------------------
 apt-get install -y openjdk-8-jdk maven
 
-wget https://services.gradle.org/distributions/gradle-4.4.1-bin.zip -P /tmp --quiet
-unzip -q /tmp/gradle-4.4.1-bin.zip -d /opt && rm /tmp/gradle-4.4.1-bin.zip
-ln -s /opt/gradle-4.4.1/bin/gradle /usr/bin
+wget https://services.gradle.org/distributions/gradle-2.12-bin.zip -P /tmp --quiet
+unzip -q /tmp/gradle-2.12-bin.zip -d /opt && rm /tmp/gradle-2.12-bin.zip
+ln -s /opt/gradle-2.12/bin/gradle /usr/bin
 
 # ----------------------------------------------------------------
 # Misc tasks
@@ -120,8 +121,7 @@ sudo cp /hyperledger/fabric/devenv/limits.conf /etc/security/limits.conf
 # Configure vagrant specific environment
 cat <<EOF >/etc/profile.d/vagrant-devenv.sh
 # Expose the devenv/tools in the $PATH
-export PATH=\$PATH:/hyperledger/fabric/devenv/tools:/hyperledger/fabric/.build/bin
-export FABRIC_CFG_PATH=/hyperledger/fabric/sampleconfig/
+export PATH=\$PATH:/hyperledger/fabric/devenv/tools:/hyperledger/fabric/build/bin
 export VAGRANT=1
 export CGO_CFLAGS=" "
 EOF

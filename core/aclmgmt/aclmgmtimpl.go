@@ -12,6 +12,8 @@ import (
 
 var aclMgmtLogger = flogging.MustGetLogger("aclmgmt")
 
+type aclMethod func(resName string, channelID string, idinfo interface{}) error
+
 //implementation of aclMgmt. CheckACL calls in fabric result in the following flow
 //    if resourceProvider[resourceName]
 //       return resourceProvider[resourceName].CheckACL(...)
@@ -34,8 +36,11 @@ func (am *aclMgmtImpl) CheckACL(resName string, channelID string, idinfo interfa
 //ACLProvider consists of two providers, supplied one and a default one (1.0 ACL management
 //using ChannelReaders and ChannelWriters). If supplied provider is nil, a resource based
 //ACL provider is created.
-func NewACLProvider(rg ResourceGetter) ACLProvider {
-	return &aclMgmtImpl{
-		rescfgProvider: newResourceProvider(rg, NewDefaultACLProvider()),
+func newACLMgmt(prov ACLProvider) ACLProvider {
+	rp := prov
+	if rp == nil {
+		rp = newResourceProvider(nil, newDefaultACLProvider())
 	}
+
+	return &aclMgmtImpl{rescfgProvider: rp}
 }

@@ -11,9 +11,10 @@ import (
 	"net"
 	"strings"
 	"testing"
+
 	"time"
 
-	"github.com/hyperledger/fabric/core/config/configtest"
+	"github.com/hyperledger/fabric/core/config"
 	"github.com/hyperledger/fabric/gossip/api"
 	"github.com/hyperledger/fabric/gossip/common"
 	"github.com/hyperledger/fabric/gossip/util"
@@ -72,7 +73,7 @@ func TestNewGossipCryptoService(t *testing.T) {
 func setupTestEnv() {
 	viper.SetConfigName("core")
 	viper.SetEnvPrefix("CORE")
-	configtest.AddDevConfigPath(nil)
+	config.AddDevConfigPath(nil)
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()
 	err := viper.ReadInConfig()
@@ -85,7 +86,7 @@ type secAdviser struct {
 }
 
 func (sa *secAdviser) OrgByPeerIdentity(api.PeerIdentityType) api.OrgIdentityType {
-	return api.OrgIdentityType("SampleOrg")
+	return api.OrgIdentityType("DEFAULT")
 }
 
 type cryptoService struct {

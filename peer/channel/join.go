@@ -17,7 +17,6 @@ limitations under the License.
 package channel
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -28,6 +27,7 @@ import (
 	pb "github.com/hyperledger/fabric/protos/peer"
 	putils "github.com/hyperledger/fabric/protos/utils"
 	"github.com/spf13/cobra"
+	"golang.org/x/net/context"
 )
 
 const commandDescription = "Joins the peer to a channel."
@@ -122,7 +122,7 @@ func executeJoin(cf *ChannelCmdFactory) (err error) {
 	}
 
 	if proposalResp.Response.Status != 0 && proposalResp.Response.Status != 200 {
-		return ProposalFailedErr(fmt.Sprintf("bad proposal response %d: %s", proposalResp.Response.Status, proposalResp.Response.Message))
+		return ProposalFailedErr(fmt.Sprintf("bad proposal response %d", proposalResp.Response.Status))
 	}
 	logger.Info("Successfully submitted proposal to join channel")
 	return nil
@@ -132,12 +132,10 @@ func join(cmd *cobra.Command, args []string, cf *ChannelCmdFactory) error {
 	if genesisBlockPath == common.UndefinedParamValue {
 		return errors.New("Must supply genesis block path")
 	}
-	// Parsing of the command line is done so silence cmd usage
-	cmd.SilenceUsage = true
 
 	var err error
 	if cf == nil {
-		cf, err = InitCmdFactory(EndorserRequired, PeerDeliverNotRequired, OrdererNotRequired)
+		cf, err = InitCmdFactory(EndorserRequired, OrdererNotRequired)
 		if err != nil {
 			return err
 		}

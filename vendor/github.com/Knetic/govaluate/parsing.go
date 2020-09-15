@@ -48,7 +48,7 @@ func parseTokens(expression string, functions map[string]ExpressionFunction) ([]
 		return nil, err
 	}
 
-	return ret, nil
+	return optimizeTokens(ret)
 }
 
 func readToken(stream *lexerStream, state lexerState, functions map[string]ExpressionFunction) (ExpressionToken, error, bool) {
@@ -196,35 +196,35 @@ func readToken(stream *lexerStream, state lexerState, functions map[string]Expre
 		// quick hack for the case where "-" can mean "prefixed negation" or "minus", which are used
 		// very differently.
 		if state.canTransitionTo(PREFIX) {
-			_, found = prefixSymbols[tokenString]
+			_, found = PREFIX_SYMBOLS[tokenString]
 			if found {
 
 				kind = PREFIX
 				break
 			}
 		}
-		_, found = modifierSymbols[tokenString]
+		_, found = MODIFIER_SYMBOLS[tokenString]
 		if found {
 
 			kind = MODIFIER
 			break
 		}
 
-		_, found = logicalSymbols[tokenString]
+		_, found = LOGICAL_SYMBOLS[tokenString]
 		if found {
 
 			kind = LOGICALOP
 			break
 		}
 
-		_, found = comparatorSymbols[tokenString]
+		_, found = COMPARATOR_SYMBOLS[tokenString]
 		if found {
 
 			kind = COMPARATOR
 			break
 		}
 
-		_, found = ternarySymbols[tokenString]
+		_, found = TERNARY_SYMBOLS[tokenString]
 		if found {
 
 			kind = TERNARY
@@ -315,7 +315,7 @@ func optimizeTokens(tokens []ExpressionToken) ([]ExpressionToken, error) {
 			continue
 		}
 
-		symbol = comparatorSymbols[token.Value.(string)]
+		symbol = COMPARATOR_SYMBOLS[token.Value.(string)]
 		if symbol != REQ && symbol != NREQ {
 			continue
 		}
@@ -441,7 +441,7 @@ func tryParseExactTime(candidate string, format string) (time.Time, bool) {
 	var ret time.Time
 	var err error
 
-	ret, err = time.ParseInLocation(format, candidate, time.Local)
+	ret, err = time.Parse(format, candidate)
 	if err != nil {
 		return time.Now(), false
 	}

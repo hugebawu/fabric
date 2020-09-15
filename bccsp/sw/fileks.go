@@ -17,23 +17,25 @@ package sw
 
 import (
 	"bytes"
+	"io/ioutil"
+	"os"
+	"sync"
+
+	"errors"
+	"strings"
+
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"encoding/hex"
-	"errors"
 	"fmt"
-	"io/ioutil"
-	"os"
 	"path/filepath"
-	"strings"
-	"sync"
 
 	"github.com/hyperledger/fabric/bccsp"
 	"github.com/hyperledger/fabric/bccsp/utils"
 )
 
 // NewFileBasedKeyStore instantiated a file-based key store at a given position.
-// The key store can be encrypted if a non-empty password is specified.
+// The key store can be encrypted if a non-empty password is specifiec.
 // It can be also be set as read only. In this case, any store operation
 // will be forbidden
 func NewFileBasedKeyStore(pwd []byte, path string, readOnly bool) (bccsp.KeyStore, error) {
@@ -110,7 +112,7 @@ func (ks *fileBasedKeyStore) ReadOnly() bool {
 }
 
 // GetKey returns a key object whose SKI is the one passed.
-func (ks *fileBasedKeyStore) GetKey(ski []byte) (bccsp.Key, error) {
+func (ks *fileBasedKeyStore) GetKey(ski []byte) (k bccsp.Key, err error) {
 	// Validate arguments
 	if len(ski) == 0 {
 		return nil, errors.New("Invalid SKI. Cannot be of zero length.")
@@ -286,7 +288,7 @@ func (ks *fileBasedKeyStore) storePrivateKey(alias string, privateKey interface{
 		return err
 	}
 
-	err = ioutil.WriteFile(ks.getPathForAlias(alias, "sk"), rawKey, 0600)
+	err = ioutil.WriteFile(ks.getPathForAlias(alias, "sk"), rawKey, 0700)
 	if err != nil {
 		logger.Errorf("Failed storing private key [%s]: [%s]", alias, err)
 		return err
@@ -302,7 +304,7 @@ func (ks *fileBasedKeyStore) storePublicKey(alias string, publicKey interface{})
 		return err
 	}
 
-	err = ioutil.WriteFile(ks.getPathForAlias(alias, "pk"), rawKey, 0600)
+	err = ioutil.WriteFile(ks.getPathForAlias(alias, "pk"), rawKey, 0700)
 	if err != nil {
 		logger.Errorf("Failed storing private key [%s]: [%s]", alias, err)
 		return err
@@ -318,7 +320,7 @@ func (ks *fileBasedKeyStore) storeKey(alias string, key []byte) error {
 		return err
 	}
 
-	err = ioutil.WriteFile(ks.getPathForAlias(alias, "key"), pem, 0600)
+	err = ioutil.WriteFile(ks.getPathForAlias(alias, "key"), pem, 0700)
 	if err != nil {
 		logger.Errorf("Failed storing key [%s]: [%s]", alias, err)
 		return err
@@ -423,7 +425,7 @@ func (ks *fileBasedKeyStore) openKeyStore() error {
 	if ks.isOpen {
 		return nil
 	}
-	ks.isOpen = true
+
 	logger.Debugf("KeyStore opened at [%s]...done", ks.path)
 
 	return nil

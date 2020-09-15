@@ -1,7 +1,17 @@
 /*
-Copyright IBM Corp. All Rights Reserved.
+Copyright IBM Corp. 2016 All Rights Reserved.
 
-SPDX-License-Identifier: Apache-2.0
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+                 http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
 
 package solo
@@ -13,9 +23,16 @@ import (
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/orderer/consensus"
 	cb "github.com/hyperledger/fabric/protos/common"
+	"github.com/op/go-logging"
 )
 
-var logger = flogging.MustGetLogger("orderer.consensus.solo")
+const pkgLogID = "orderer/consensus/solo"
+
+var logger *logging.Logger
+
+func init() {
+	logger = flogging.MustGetLogger(pkgLogID)
+}
 
 type consenter struct{}
 
@@ -117,27 +134,18 @@ func (ch *chain) main() {
 						continue
 					}
 				}
-				batches, pending := ch.support.BlockCutter().Ordered(msg.normalMsg)
-
+				batches, _ := ch.support.BlockCutter().Ordered(msg.normalMsg)
+				if len(batches) == 0 && timer == nil {
+					timer = time.After(ch.support.SharedConfig().BatchTimeout())
+					continue
+				}
 				for _, batch := range batches {
 					block := ch.support.CreateNextBlock(batch)
 					ch.support.WriteBlock(block, nil)
 				}
-
-				switch {
-				case timer != nil && !pending:
-					// Timer is already running but there are no messages pending, stop the timer
+				if len(batches) > 0 {
 					timer = nil
-				case timer == nil && pending:
-					// Timer is not already running and there are messages pending, so start it
-					timer = time.After(ch.support.SharedConfig().BatchTimeout())
-					logger.Debugf("Just began %s batch timer", ch.support.SharedConfig().BatchTimeout().String())
-				default:
-					// Do nothing when:
-					// 1. Timer is already running and there are messages pending
-					// 2. Timer is not set and there are no messages pending
 				}
-
 			} else {
 				// ConfigMsg
 				if msg.configSeq < seq {

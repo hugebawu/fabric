@@ -1,14 +1,5 @@
-Architecture Origins
-====================
-
-.. note :: This document represents the initial architectural proposal
-           for Hyperledger Fabric v1.0. While the Hyperledger Fabric
-           implementation has conceptually followed from the architectural
-           proposal, some details have been altered during the
-           implementation. The initial architectural proposal is
-           presented as originally prepared. For a more technically
-           accurate representation of the architecture, please see
-           `Hyperledger Fabric: A Distributed Operating System for Permissioned Blockchains <https://arxiv.org/abs/1801.10228v2>`__.
+Architecture Explained
+======================
 
 The Hyperledger Fabric architecture delivers the following advantages:
 
@@ -42,7 +33,7 @@ v1**
 2. Basic workflow of transaction endorsement
 3. Endorsement policies
 
-**Part II: Post-v1 elements of the architecture**
+   **Part II: Post-v1 elements of the architecture**
 
 4. Ledger checkpointing (pruning)
 
@@ -90,7 +81,7 @@ support for cross-chaincode transactions (post-v1 feature).*
 ^^^^^^^^^^^^
 
 The latest state of the blockchain (or, simply, *state*) is modeled as a
-versioned key-value store (KVS), where keys are names and values are
+versioned key/value store (KVS), where keys are names and values are
 arbitrary blobs. These entries are manipulated by the chaincodes
 (applications) running on the blockchain through ``put`` and ``get``
 KVS-operations. The state is stored persistently and updates to the
@@ -108,7 +99,7 @@ More formally, state ``s`` is modeled as an element of a mapping
    next version number.
 
 Both ``V`` and ``N`` contain a special element |falsum| (empty type), which is
-in case of ``N`` the lowest element. Initially all keys are mapped to
+in case of ``N`` the lowest element. Initially all keys are mapped to 
 (|falsum|, |falsum|). For ``s(k)=(v,ver)`` we denote ``v`` by ``s(k).value``,
 and ``ver`` by ``s(k).version``.
 
@@ -289,7 +280,7 @@ transaction endorsement (Section 2) assuming one blob per ``deliver``
 event. These are easily extended to blocks, assuming that a ``deliver``
 event for a block corresponds to a sequence of individual ``deliver``
 events for each blob within a block, according to the above mentioned
-deterministic ordering of blobs within a block.
+deterministic ordering of blobs within a blocs.
 
 **Ordering service properties**
 
@@ -476,11 +467,11 @@ As a result of the execution, the endorsing peer computes *read version
 dependencies* (``readset``) and *state updates* (``writeset``), also
 called *MVCC+postimage info* in DB language.
 
-Recall that the state consists of key-value pairs. All key-value entries
-are versioned; that is, every entry contains ordered version
-information, which is incremented each time the value stored under
+Recall that the state consists of key/value (k/v) pairs. All k/v entries
+are versioned, that is, every entry contains ordered version
+information, which is incremented every time when the value stored under
 a key is updated. The peer that interprets the transaction records all
-key-value pairs accessed by the chaincode, either for reading or for writing,
+k/v pairs accessed by the chaincode, either for reading or for writing,
 but the peer does not yet update its state. More specifically:
 
 -  Given state ``s`` before an endorsing peer executes a transaction,
@@ -601,8 +592,6 @@ are deterministic, all correct peers will also come to the same
 conclusion whether a transaction contained in a blob is valid. Hence,
 all peers commit and apply the same sequence of transactions and update
 their state in the same way.
-
-.. _swimlane:
 
 .. image:: images/flow-4.png
    :alt: Illustration of the transaction flow (common-case path).

@@ -134,10 +134,6 @@ type Identity struct {
 	Msg            []byte
 }
 
-func (id *Identity) Anonymous() bool {
-	panic("implement me")
-}
-
 func (id *Identity) ExpiresAt() time.Time {
 	return id.expirationDate
 }

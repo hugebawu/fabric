@@ -17,11 +17,10 @@ limitations under the License.
 package support
 
 import (
-	"sync"
-
 	"github.com/hyperledger/fabric/common/channelconfig"
 	mockpolicies "github.com/hyperledger/fabric/common/mocks/policies"
 	"github.com/hyperledger/fabric/common/policies"
+	"github.com/hyperledger/fabric/common/resourcesconfig"
 	"github.com/hyperledger/fabric/core/ledger"
 	"github.com/hyperledger/fabric/msp"
 	"github.com/hyperledger/fabric/protos/common"
@@ -32,16 +31,13 @@ type Support struct {
 	MSPManagerVal msp.MSPManager
 	ApplyVal      error
 	ACVal         channelconfig.ApplicationCapabilities
+}
 
-	sync.Mutex
-	capabilitiesInvokeCount int
-	mspManagerInvokeCount   int
+func (ms *Support) ChaincodeByName(chainname, ccname string) (resourcesconfig.ChaincodeDefinition, bool) {
+	return nil, false
 }
 
 func (ms *Support) Capabilities() channelconfig.ApplicationCapabilities {
-	ms.Lock()
-	defer ms.Unlock()
-	ms.capabilitiesInvokeCount++
 	return ms.ACVal
 }
 
@@ -52,9 +48,6 @@ func (ms *Support) Ledger() ledger.PeerLedger {
 
 // MSPManager returns MSPManagerVal
 func (ms *Support) MSPManager() msp.MSPManager {
-	ms.Lock()
-	defer ms.Unlock()
-	ms.mspManagerInvokeCount++
 	return ms.MSPManagerVal
 }
 
@@ -67,18 +60,6 @@ func (ms *Support) PolicyManager() policies.Manager {
 	return &mockpolicies.Manager{}
 }
 
-func (ms *Support) GetMSPIDs(cid string) []string {
-	return []string{"SampleOrg"}
-}
-
-func (ms *Support) CapabilitiesInvokeCount() int {
-	ms.Lock()
-	defer ms.Unlock()
-	return ms.capabilitiesInvokeCount
-}
-
-func (ms *Support) MSPManagerInvokeCount() int {
-	ms.Lock()
-	defer ms.Unlock()
-	return ms.mspManagerInvokeCount
+func (cs *Support) GetMSPIDs(cid string) []string {
+	return []string{"DEFAULT"}
 }

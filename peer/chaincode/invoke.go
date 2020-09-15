@@ -1,15 +1,25 @@
 /*
-Copyright IBM Corp. All Rights Reserved.
+Copyright IBM Corp. 2016 All Rights Reserved.
 
-SPDX-License-Identifier: Apache-2.0
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+		 http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
 
 package chaincode
 
 import (
+	"errors"
 	"fmt"
 
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -23,39 +33,31 @@ func invokeCmd(cf *ChaincodeCmdFactory) *cobra.Command {
 		Long:      fmt.Sprintf("Invoke the specified %s. It will try to commit the endorsed transaction to the network.", chainFuncName),
 		ValidArgs: []string{"1"},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return chaincodeInvoke(cmd, cf)
+			return chaincodeInvoke(cmd, args, cf)
 		},
 	}
 	flagList := []string{
 		"name",
 		"ctor",
 		"channelID",
-		"peerAddresses",
-		"tlsRootCertFiles",
-		"connectionProfile",
-		"waitForEvent",
-		"waitForEventTimeout",
 	}
 	attachFlags(chaincodeInvokeCmd, flagList)
 
 	return chaincodeInvokeCmd
 }
 
-func chaincodeInvoke(cmd *cobra.Command, cf *ChaincodeCmdFactory) error {
+func chaincodeInvoke(cmd *cobra.Command, args []string, cf *ChaincodeCmdFactory) error {
 	if channelID == "" {
 		return errors.New("The required parameter 'channelID' is empty. Rerun the command with -C flag")
 	}
-	// Parsing of the command line is done so silence cmd usage
-	cmd.SilenceUsage = true
-
 	var err error
 	if cf == nil {
-		cf, err = InitCmdFactory(cmd.Name(), true, true)
+		cf, err = InitCmdFactory(true, true)
 		if err != nil {
 			return err
 		}
 	}
 	defer cf.BroadcastClient.Close()
 
-	return chaincodeInvokeOrQuery(cmd, true, cf)
+	return chaincodeInvokeOrQuery(cmd, args, true, cf)
 }

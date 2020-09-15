@@ -117,7 +117,7 @@ func ValidateProposalMessage(signedProp *pb.SignedProposal) (*pb.Proposal, *comm
 	// Verify that the transaction ID has been computed properly.
 	// This check is needed to ensure that the lookup into the ledger
 	// for the same TxID catches duplicates.
-	err = utils.CheckTxID(
+	err = utils.CheckProposalTxID(
 		chdr.TxId,
 		shdr.Nonce,
 		shdr.Creator)
@@ -127,6 +127,9 @@ func ValidateProposalMessage(signedProp *pb.SignedProposal) (*pb.Proposal, *comm
 
 	// continue the validation in a way that depends on the type specified in the header
 	switch common.HeaderType(chdr.Type) {
+	case common.HeaderType_PEER_RESOURCE_UPDATE:
+		// no additional validation required for transactions of this type
+		return prop, hdr, nil, err
 	case common.HeaderType_CONFIG:
 		//which the types are different the validation is the same
 		//viz, validate a proposal to a chaincode. If we need other
@@ -221,7 +224,7 @@ func validateChannelHeader(cHdr *common.ChannelHeader) error {
 	if common.HeaderType(cHdr.Type) != common.HeaderType_ENDORSER_TRANSACTION &&
 		common.HeaderType(cHdr.Type) != common.HeaderType_CONFIG_UPDATE &&
 		common.HeaderType(cHdr.Type) != common.HeaderType_CONFIG &&
-		common.HeaderType(cHdr.Type) != common.HeaderType_TOKEN_TRANSACTION {
+		common.HeaderType(cHdr.Type) != common.HeaderType_PEER_RESOURCE_UPDATE {
 		return errors.Errorf("invalid header type %s", common.HeaderType(cHdr.Type))
 	}
 
@@ -411,13 +414,13 @@ func ValidateTransaction(e *common.Envelope, c channelconfig.ApplicationCapabili
 		// Verify that the transaction ID has been computed properly.
 		// This check is needed to ensure that the lookup into the ledger
 		// for the same TxID catches duplicates.
-		err = utils.CheckTxID(
+		err = utils.CheckProposalTxID(
 			chdr.TxId,
 			shdr.Nonce,
 			shdr.Creator)
 
 		if err != nil {
-			putilsLogger.Errorf("CheckTxID returns err %s", err)
+			putilsLogger.Errorf("CheckProposalTxID returns err %s", err)
 			return nil, pb.TxValidationCode_BAD_PROPOSAL_TXID
 		}
 
@@ -430,6 +433,13 @@ func ValidateTransaction(e *common.Envelope, c channelconfig.ApplicationCapabili
 		} else {
 			return payload, pb.TxValidationCode_VALID
 		}
+	case common.HeaderType_PEER_RESOURCE_UPDATE:
+		if !c.ResourcesTree() {
+			return nil, pb.TxValidationCode_UNSUPPORTED_TX_PAYLOAD
+		}
+
+		// perform similar validation to common.HeaderType_CONFIG
+		fallthrough
 	case common.HeaderType_CONFIG:
 		// Config transactions have signatures inside which will be validated, especially at genesis there may be no creator or
 		// signature on the outermost envelope
@@ -442,21 +452,6 @@ func ValidateTransaction(e *common.Envelope, c channelconfig.ApplicationCapabili
 		} else {
 			return payload, pb.TxValidationCode_VALID
 		}
-	case common.HeaderType_TOKEN_TRANSACTION:
-		// Verify that the transaction ID has been computed properly.
-		// This check is needed to ensure that the lookup into the ledger
-		// for the same TxID catches duplicates.
-		err = utils.CheckTxID(
-			chdr.TxId,
-			shdr.Nonce,
-			shdr.Creator)
-
-		if err != nil {
-			putilsLogger.Errorf("CheckTxID returns err %s", err)
-			return nil, pb.TxValidationCode_BAD_PROPOSAL_TXID
-		}
-
-		return payload, pb.TxValidationCode_VALID
 	default:
 		return nil, pb.TxValidationCode_UNSUPPORTED_TX_PAYLOAD
 	}
